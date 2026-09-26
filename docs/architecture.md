@@ -135,17 +135,21 @@ stored in SQLite as plaintext — treat the store as sensitive.
 
 `mcp.rs` implements the Model Context Protocol's streamable-HTTP transport
 at `POST /mcp` — hand-rolled JSON-RPC (initialize / ping / tools/list /
-tools/call), stateless, no SDK dependency. Thirteen tools cover the whole
-platform surface (workflows, runs, execute, query, ingest, functions,
-notebooks), so an agent can compose pipelines, run them, and read results
+tools/call), stateless, no SDK dependency. Fifteen tools cover the whole
+platform surface (workflows, runs incl. cancellation, execute, query, ingest,
+dataset profiling, functions, notebooks), so an agent can compose pipelines, run them, and read results
 without touching the REST API.
 
 ## Notebooks
 
 Notebook documents (`/api/notebooks`) are stored as opaque JSON cell arrays;
-the console owns the cell schema (markdown / code / sql + chart config) and
-executes cells through `POST /api/execute` and `POST /api/query`. Execution
-state lives in the saved document, so notebooks reopen with their results.
+the console owns the cell schema (markdown / code / sql + chart spec + view
+state) and executes cells through `POST /api/execute` and `POST /api/query`.
+Execution state lives in the saved document, so notebooks reopen with their
+results. Dataflow is client-side: the editor parses `inputs[...]` references
+in code cells to build a dependency graph, re-runs dependents when a cell
+runs (reactive mode), and fingerprints each output with the code + inputs it
+was produced from so stale cells are flagged.
 
 ## Persistence
 

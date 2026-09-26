@@ -287,11 +287,11 @@ in the worker environment:</p>
 <h2>MCP — the agent surface</h2>
 <pre>claude mcp add --transport http loom http://localhost:7420/mcp</pre>
 <p>The built-in Model Context Protocol server (streamable HTTP, stateless JSON-RPC) exposes
-<b>13 tools</b>: <code>loom_stats</code>, <code>execute_code</code>, <code>query</code>,
-<code>ingest</code>, <code>list_datasets</code>, <code>list_workflows</code>,
-<code>create_workflow</code>, <code>trigger_workflow</code>, <code>get_run</code>,
-<code>list_runs</code>, <code>invoke_function</code>, <code>create_function</code>,
-<code>create_notebook</code>.</p>
+<b>15 tools</b>: <code>loom_stats</code>, <code>execute_code</code>, <code>query</code>,
+<code>ingest</code>, <code>list_datasets</code>, <code>describe_dataset</code>,
+<code>list_workflows</code>, <code>create_workflow</code>, <code>trigger_workflow</code>,
+<code>get_run</code>, <code>cancel_run</code>, <code>list_runs</code>,
+<code>invoke_function</code>, <code>create_function</code>, <code>create_notebook</code>.</p>
 <p>Because workflows are plain JSON and the server returns structured validation errors, an
 agent can loop: <i>write code → create_workflow → trigger → read failure trace → patch →
 re-trigger</i> — a self-correcting pipeline builder with Loom as the execution substrate.</p>

@@ -74,7 +74,10 @@ fn kahn_layers(tasks: &[TaskSpec]) -> Vec<Vec<String>> {
         indegree.entry(t.id.as_str()).or_insert(0);
         for dep in &t.depends_on {
             *indegree.entry(t.id.as_str()).or_insert(0) += 1;
-            dependents.entry(dep.as_str()).or_default().push(t.id.as_str());
+            dependents
+                .entry(dep.as_str())
+                .or_default()
+                .push(t.id.as_str());
         }
     }
 
@@ -144,7 +147,10 @@ mod tests {
     #[test]
     fn rejects_duplicate_ids() {
         let tasks = vec![task("a", &[]), task("a", &[])];
-        assert_eq!(validate_dag(&tasks), Err(DagError::DuplicateTask("a".into())));
+        assert_eq!(
+            validate_dag(&tasks),
+            Err(DagError::DuplicateTask("a".into()))
+        );
     }
 
     #[test]
@@ -159,7 +165,10 @@ mod tests {
     #[test]
     fn rejects_self_dependency() {
         let tasks = vec![task("a", &["a"])];
-        assert_eq!(validate_dag(&tasks), Err(DagError::SelfDependency("a".into())));
+        assert_eq!(
+            validate_dag(&tasks),
+            Err(DagError::SelfDependency("a".into()))
+        );
     }
 
     #[test]

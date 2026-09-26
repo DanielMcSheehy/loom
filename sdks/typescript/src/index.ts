@@ -98,6 +98,27 @@ export interface TaskRun {
   finished_at?: string | null;
 }
 
+export interface ColumnProfile {
+  name: string;
+  dtype: "integer" | "float" | "string" | "boolean" | "datetime" | "list" | "struct" | "null" | "other";
+  null_count: number;
+  min: Json;
+  max: Json;
+  mean: number | null;
+  distinct: number | null;
+}
+
+export interface DatasetProfile {
+  name: string;
+  records: number;
+  bytes: number;
+  created_at: string;
+  updated_at: string;
+  columns: ColumnProfile[];
+  sample: Array<Record<string, Json>>;
+  sample_size: number;
+}
+
 export interface LoomEvent {
   type: "run_updated" | "task_updated" | "log" | "ingested" | "function_invoked";
   ts: string;
@@ -364,6 +385,14 @@ export class LoomClient {
     return this.request("GET", `/api/runs/${id}`);
   }
 
+  /**
+   * Cancel a pending/running run; resolves with the (now cancelled) run.
+   * Rejects with a 409 `LoomError` if the run already finished.
+   */
+  cancelRun(id: string): Promise<Run> {
+    return this.request("POST", `/api/runs/${id}/cancel`);
+  }
+
   // ── serverless functions ───────────────────────────────────────────────
 
   createFunction(spec: {
@@ -404,6 +433,18 @@ export class LoomClient {
 
   listDatasets(): Promise<Json> {
     return this.request("GET", "/api/datasets");
+  }
+
+  /**
+   * Column profile (dtype, nulls, min/max/mean, distinct) plus the first
+   * `sample` rows (1..=200, default 20).
+   */
+  describeDataset(name: string, options: { sample?: number } = {}): Promise<DatasetProfile> {
+    return this.request("GET", `/api/datasets/${name}?sample=${options.sample ?? 20}`);
+  }
+
+  deleteDataset(name: string): Promise<void> {
+    return this.request("DELETE", `/api/datasets/${name}`);
   }
 
   /**

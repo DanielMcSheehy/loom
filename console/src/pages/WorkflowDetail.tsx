@@ -1,66 +1,22 @@
+import { PencilSimple, Play, Trash } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, formatDuration, timeAgo, useEvents } from "../api";
+import { useNavigate, useParams } from "react-router-dom";
+import { api, formatDuration, formatMs, timeAgo, useEvents } from "../api";
+import { useCrumbs } from "../App";
+import Chart from "../components/charts/Chart";
 import DagGraph from "../components/DagGraph";
+import { Banner, Empty, RuntimeBadge, StatusPill, Tile, useConfirm, useToast } from "../components/ui";
 import WorkflowBuilder from "../components/WorkflowBuilder";
-import { Empty, RuntimeBadge, StatusPill, Tile } from "../components/ui";
 import type { Run, TaskRun, Workflow, WorkflowSpec } from "../types";
-import { computeMetrics, formatMs, HistoryBars } from "./Workflows";
+import { computeMetrics, HistoryBars } from "./Workflows";
 
-/** Duration trend of recent runs, colored by outcome. */
-function DurationTrend({ runs }: { runs: Run[] }) {
-  const ordered = [...runs].reverse().slice(-30);
-  const points = ordered.map((r) => ({
-    run: r,
-    ms:
-      r.started_at && r.finished_at
-        ? new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()
-        : 0,
-  }));
-  const max = Math.max(1, ...points.map((p) => p.ms));
-  const W = 720;
-  const H = 110;
-  const slot = W / Math.max(12, points.length);
-  const bw = Math.max(6, Math.min(26, slot - 5));
-  const FILL: Record<string, string> = {
-    completed: "#34d399",
-    failed: "#f87171",
-    running: "#38bdf8",
-    cancelled: "#64748b",
-    pending: "#64748b",
-  };
-  return (
-    <svg viewBox={`0 0 ${W} ${H + 16}`} className="activity-chart" role="img" aria-label="Run duration trend">
-      <line className="chart-grid" x1="0" x2={W} y1={H} y2={H} />
-      {points.map((p, i) => {
-        const h = Math.max(3, (p.ms / max) * (H - 10));
-        const x = i * slot + (slot - bw) / 2;
-        return (
-          <rect key={p.run.id} x={x} y={H - h} width={bw} height={h} rx="3" fill={FILL[p.run.state] ?? "#64748b"}>
-            <title>{`${p.run.state} · ${formatMs(p.ms)} · ${timeAgo(p.run.created_at)}`}</title>
-          </rect>
-        );
-      })}
-      <text className="chart-tick" x={0} y={H + 13}>
-        older
-      </text>
-      <text className="chart-tick" x={W} y={H + 13} textAnchor="end">
-        newest
-      </text>
-    </svg>
-  );
-}
+const STATE_COLORS = { completed: "var(--good)", failed: "var(--critical)", running: "var(--running)", cancelled: "var(--ink-4)", pending: "var(--ink-4)" };
 
 function RunningProgress({ run, onClick }: { run: Run; onClick: () => void }) {
   const [tasks, setTasks] = useState<TaskRun[]>([]);
-
   const refresh = useCallback(() => {
-    api
-      .get<{ run: Run; tasks: TaskRun[] }>(`/api/runs/${run.id}`)
-      .then((d) => setTasks(d.tasks))
-      .catch(() => {});
+    api.get<{ run: Run; tasks: TaskRun[] }>(`/api/runs/${run.id}`).then((d) => setTasks(d.tasks)).catch(() => {});
   }, [run.id]);
-
   useEffect(refresh, [refresh]);
   useEvents((ev) => {
     if (ev.type === "task_updated") {
@@ -73,24 +29,15 @@ function RunningProgress({ run, onClick }: { run: Run; onClick: () => void }) {
       });
     }
   }, run.id);
-
   const done = tasks.filter((t) => t.state === "completed").length;
   const total = Math.max(1, tasks.length);
   const runningTask = tasks.find((t) => t.state === "running");
   return (
-    <div className="running-banner" style={{ cursor: "pointer" }} onClick={onClick}>
+    <div className="running-banner" onClick={onClick}>
       <StatusPill state="running" />
-      <div className="progress-track">
-        <div className="progress-fill" style={{ width: `${(done / total) * 100}%` }} />
-      </div>
-      <span style={{ color: "var(--ink)", fontWeight: 600, whiteSpace: "nowrap" }}>
-        {done}/{total} tasks
-      </span>
-      {runningTask && (
-        <span className="muted mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-          ▸ {runningTask.task_id}
-        </span>
-      )}
+      <div className="progress-track"><div className="progress-fill" style={{ width: `${(done / total) * 100}%` }} /></div>
+      <span style={{ color: "var(--ink)", fontWeight: 600, whiteSpace: "nowrap" }}>{done}/{total} tasks</span>
+      {runningTask && <span className="muted mono small" style={{ whiteSpace: "nowrap" }}>▸ {runningTask.task_id}</span>}
     </div>
   );
 }
@@ -101,16 +48,18 @@ export default function WorkflowDetail() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [paramsDraft, setParamsDraft] = useState("");
+  const [confirm, confirmDialog] = useConfirm();
+  const toast = useToast();
   const navigate = useNavigate();
+  useCrumbs([{ label: "Workflows", to: "/workflows" }, { label: workflow?.spec.name ?? "…" }]);
 
   const refresh = useCallback(() => {
     if (!id) return;
     api.get<Workflow>(`/api/workflows/${id}`).then(setWorkflow).catch((e) => setError(e.message));
     api.get<Run[]>(`/api/runs?workflow_id=${id}&limit=100`).then(setRuns).catch(() => {});
   }, [id]);
-
   useEffect(refresh, [refresh]);
-
   useEvents((ev) => {
     if (ev.type === "run_updated" && ev.run.workflow_id === id) {
       setRuns((prev) => {
@@ -124,22 +73,30 @@ export default function WorkflowDetail() {
   });
 
   const metrics = useMemo(() => computeMetrics(runs), [runs]);
-  const successPct =
-    metrics.completed + metrics.failed > 0
-      ? Math.round((metrics.completed / (metrics.completed + metrics.failed)) * 100)
-      : null;
+  const successPct = metrics.completed + metrics.failed > 0 ? Math.round((metrics.completed / (metrics.completed + metrics.failed)) * 100) : null;
   const activeRuns = runs.filter((r) => r.state === "running" || r.state === "pending");
+  const trend = useMemo(
+    () =>
+      [...runs]
+        .reverse()
+        .slice(-40)
+        .map((r, i) => ({ run: `#${i + 1}`, ms: r.started_at && r.finished_at ? new Date(r.finished_at).getTime() - new Date(r.started_at).getTime() : 0, state: r.state })),
+    [runs],
+  );
 
   const save = async (spec: WorkflowSpec) => {
     const wf = await api.put<Workflow>(`/api/workflows/${id}`, spec);
     setWorkflow(wf);
     setEditing(false);
+    toast("Workflow saved");
   };
 
   const trigger = async () => {
     setError(null);
     try {
-      const run = await api.post<Run>(`/api/workflows/${id}/trigger`, { params: {} });
+      let params: unknown = {};
+      if (paramsDraft.trim()) params = JSON.parse(paramsDraft);
+      const run = await api.post<Run>(`/api/workflows/${id}/trigger`, { params });
       navigate(`/runs/${run.id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -147,111 +104,73 @@ export default function WorkflowDetail() {
   };
 
   const remove = async () => {
-    if (!window.confirm(`Delete workflow "${workflow?.spec.name}"?`)) return;
+    if (!(await confirm({ title: `Delete “${workflow?.spec.name}”?`, body: "Run history stays; the workflow and its triggers are removed.", confirmLabel: "Delete workflow" }))) return;
     await api.delete(`/api/workflows/${id}`);
     navigate("/workflows");
   };
 
-  if (!workflow) {
-    return error ? <div className="error-banner">{error}</div> : <p className="muted">Loading…</p>;
-  }
+  if (!workflow) return <div className="content">{error ? <Banner kind="error">{error}</Banner> : <div className="skeleton" style={{ height: 28, width: 300 }} />}</div>;
 
   return (
-    <>
-      <div className="crumbs">
-        <Link to="/workflows">Workflows</Link> / {workflow.spec.name}
-      </div>
+    <div className="content">
+      {confirmDialog}
       <div className="page-head">
         <div>
-          <h1 style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h1>
             {workflow.spec.name}
             {metrics.last && <StatusPill state={metrics.last.state} />}
           </h1>
           <p>
-            {workflow.spec.description || "No description."} ·{" "}
-            {[...new Set(workflow.spec.tasks.map((t) => t.runtime))].map((r) => (
-              <RuntimeBadge key={r} runtime={r} />
-            ))}
+            {workflow.spec.description || "No description."} · {[...new Set(workflow.spec.tasks.map((t) => t.runtime))].map((r) => <RuntimeBadge key={r} runtime={r} />)}
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn danger" onClick={remove}>
-            Delete
-          </button>
-          <button className="btn" onClick={() => setEditing((v) => !v)}>
-            {editing ? "Close editor" : "✎ Edit"}
-          </button>
-          <button className="btn primary" onClick={trigger}>
-            ▶ Trigger run
-          </button>
+        <div className="actions">
+          <button className="btn danger" onClick={remove}><Trash size={14} /> Delete</button>
+          <button className="btn" onClick={() => setEditing((v) => !v)}><PencilSimple size={14} /> {editing ? "Close editor" : "Edit"}</button>
+          <input type="text" className="mono" placeholder='params override {"n": 5}' value={paramsDraft} onChange={(e) => setParamsDraft(e.target.value)} style={{ width: 200 }} />
+          <button className="btn primary" onClick={trigger}><Play size={14} weight="fill" /> Trigger run</button>
         </div>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && <Banner kind="error">{error}</Banner>}
 
       {editing && (
-        <div className="card" style={{ marginBottom: 20 }}>
-          <div className="card-head">
-            <h2>Edit workflow</h2>
-          </div>
-          <div className="card-body">
-            <WorkflowBuilder initial={workflow.spec} submitLabel="Save" onSubmit={save} />
-          </div>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-head"><h2>Edit workflow</h2></div>
+          <div className="card-body"><WorkflowBuilder initial={workflow.spec} submitLabel="Save changes" onSubmit={save} /></div>
         </div>
       )}
 
-      {activeRuns.map((r) => (
-        <RunningProgress key={r.id} run={r} onClick={() => navigate(`/runs/${r.id}`)} />
-      ))}
+      {activeRuns.map((r) => <RunningProgress key={r.id} run={r} onClick={() => navigate(`/runs/${r.id}`)} />)}
 
       <div className="tiles">
         <Tile label="Total runs" value={metrics.total} />
-        <Tile
-          label="Success rate"
-          value={successPct === null ? "—" : `${successPct}%`}
-          sub={`${metrics.completed} ok / ${metrics.failed} failed`}
-          tone={successPct === null ? undefined : successPct >= 80 ? "good" : "bad"}
-        />
-        <Tile
-          label="Avg duration"
-          value={metrics.avgMs != null ? formatMs(metrics.avgMs) : "—"}
-          tone="accent"
-        />
-        <Tile
-          label="Last run"
-          value={metrics.last ? timeAgo(metrics.last.created_at) : "never"}
-          sub={metrics.last ? `trigger: ${metrics.last.trigger}` : undefined}
-        />
+        <Tile label="Success rate" value={successPct === null ? "—" : `${successPct}%`} sub={`${metrics.completed} ok · ${metrics.failed} failed`} tone={successPct === null ? undefined : successPct >= 80 ? "good" : "bad"} />
+        <Tile label="Avg duration" value={metrics.avgMs != null ? formatMs(metrics.avgMs) : "—"} tone="accent" />
+        <Tile label="Last run" value={metrics.last ? timeAgo(metrics.last.created_at) : "never"} sub={metrics.last ? `trigger: ${metrics.last.trigger}` : undefined} />
+        <Tile label="Schedule" value={workflow.spec.triggers.every_secs ? `${workflow.spec.triggers.every_secs}s` : workflow.spec.triggers.on_ingest ? "on ingest" : "manual"} sub={workflow.spec.triggers.on_ingest ? `dataset ${workflow.spec.triggers.on_ingest}` : `${workflow.spec.max_parallel_tasks} parallel max`} />
       </div>
 
-      {runs.length > 0 && (
+      <div className="grid-2" style={{ gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)" }}>
         <div className="card">
           <div className="card-head">
-            <h2>Duration trend</h2>
+            <h2>Task graph <span className="sub">{workflow.spec.tasks.length} tasks</span></h2>
+          </div>
+          <div className="card-body"><DagGraph tasks={workflow.spec.tasks} /></div>
+        </div>
+        <div className="card">
+          <div className="card-head">
+            <h2>Duration trend <span className="sub">last {trend.length} runs</span></h2>
             <HistoryBars history={metrics.history} />
           </div>
-          <div className="card-body">
-            <DurationTrend runs={runs} />
+          <div className="card-body" style={{ paddingBottom: 6 }}>
+            {trend.length ? <Chart rows={trend} spec={{ mark: "bar", x: "run", y: ["ms"], color: "state", agg: "sum" }} height={170} colors={STATE_COLORS} /> : <Empty title="Never run" />}
           </div>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="card-head">
-          <h2>Task graph</h2>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {workflow.spec.tasks.length} tasks · max {workflow.spec.max_parallel_tasks} parallel
-          </span>
-        </div>
-        <div className="card-body">
-          <DagGraph tasks={workflow.spec.tasks} />
         </div>
       </div>
 
       <div className="card">
-        <div className="card-head">
-          <h2>Runs</h2>
-        </div>
+        <div className="card-head"><h2>Runs</h2></div>
         {runs.length === 0 ? (
           <Empty title="Never run" hint="Trigger it to see run history." />
         ) : (
@@ -268,13 +187,9 @@ export default function WorkflowDetail() {
             <tbody>
               {runs.slice(0, 25).map((r) => (
                 <tr key={r.id} className="rowlink" onClick={() => navigate(`/runs/${r.id}`)}>
-                  <td className="mono">{r.id.slice(0, 8)}</td>
-                  <td>
-                    <StatusPill state={r.state} />
-                  </td>
-                  <td>
-                    <span className="trigger-chip">{r.trigger}</span>
-                  </td>
+                  <td className="mono muted">{r.id.slice(0, 8)}</td>
+                  <td><StatusPill state={r.state} /></td>
+                  <td><span className="chip">{r.trigger}</span></td>
                   <td className="num">{formatDuration(r.started_at, r.finished_at)}</td>
                   <td className="num muted">{timeAgo(r.created_at)}</td>
                 </tr>
@@ -283,6 +198,6 @@ export default function WorkflowDetail() {
           </table>
         )}
       </div>
-    </>
+    </div>
   );
 }

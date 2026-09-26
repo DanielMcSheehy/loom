@@ -1,141 +1,141 @@
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { api, formatBytes, formatDuration, timeAgo, useEvents } from "../api";
+import { ArrowRight, Pulse } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { api, formatBytes, formatDuration, formatNumber, timeAgo, useEvents } from "../api";
+import { useCrumbs } from "../App";
+import Chart from "../components/charts/Chart";
 import { Empty, StatusPill, Tile } from "../components/ui";
-import type { LoomEvent, Run, Stats } from "../types";
+import type { LoomEvent, Run, Stats, Workflow } from "../types";
 
-function describe(ev: LoomEvent): string {
+function describe(ev: LoomEvent): { kind: string; text: string; to?: string } {
   switch (ev.type) {
     case "run_updated":
-      return `run ${ev.run.workflow_name} → ${ev.run.state}`;
+      return { kind: "run", text: `${ev.run.workflow_name} → ${ev.run.state}`, to: `/runs/${ev.run.id}` };
     case "task_updated":
-      return `task ${ev.task.task_id} → ${ev.task.state}`;
+      return { kind: "task", text: `${ev.task.task_id} → ${ev.task.state}`, to: `/runs/${ev.task.run_id}` };
     case "log":
-      return `[${ev.task_id}] ${ev.line}`;
+      return { kind: "log", text: `[${ev.task_id}] ${ev.line}`, to: `/runs/${ev.run_id}` };
     case "ingested":
-      return `ingested ${ev.records.toLocaleString()} records (${formatBytes(ev.bytes)}) into ${ev.dataset}`;
+      return { kind: "ingest", text: `${ev.records.toLocaleString()} records (${formatBytes(ev.bytes)}) into ${ev.dataset}`, to: `/data?dataset=${ev.dataset}` };
     case "function_invoked":
-      return `function ${ev.name} ${ev.ok ? "succeeded" : "failed"} in ${ev.duration_ms}ms`;
+      return { kind: "invoke", text: `${ev.name} ${ev.ok ? "succeeded" : "failed"} in ${ev.duration_ms}ms`, to: `/functions?name=${ev.name}` };
   }
 }
 
-function ActivityChart({ runs }: { runs: Run[] }) {
-  // Runs per hour over the last 24h, completed vs failed stacked.
-  const buckets = Array.from({ length: 24 }, (_, i) => ({ ok: 0, failed: 0, hour: i }));
-  const now = Date.now();
-  for (const r of runs) {
-    const age = now - new Date(r.created_at).getTime();
-    if (age < 0 || age > 24 * 3600_000) continue;
-    const idx = 23 - Math.floor(age / 3600_000);
-    if (r.state === "failed") buckets[idx].failed++;
-    else if (r.state === "completed") buckets[idx].ok++;
-  }
-  const max = Math.max(1, ...buckets.map((b) => b.ok + b.failed));
-  const W = 720;
-  const H = 120;
-  const slot = W / 24;
-  const bw = Math.max(4, slot - 4);
-  return (
-    <svg viewBox={`0 0 ${W} ${H + 18}`} className="activity-chart" role="img" aria-label="Runs in the last 24 hours">
-      {buckets.map((b, i) => {
-        const total = b.ok + b.failed;
-        const hOk = (b.ok / max) * H;
-        const hFail = (b.failed / max) * H;
-        const x = i * slot + (slot - bw) / 2;
-        const hourAgo = 23 - i;
-        return (
-          <g key={i}>
-            {total === 0 && <rect x={x} y={H - 2} width={bw} height={2} rx="1" fill="var(--grid)" />}
-            {b.ok > 0 && (
-              <rect x={x} y={H - hOk} width={bw} height={Math.max(2, hOk)} rx="2" fill="#34d399">
-                <title>{`${b.ok} completed, ${hourAgo}h ago`}</title>
-              </rect>
-            )}
-            {b.failed > 0 && (
-              <rect x={x} y={H - hOk - hFail - 2} width={bw} height={Math.max(2, hFail)} rx="2" fill="#f87171">
-                <title>{`${b.failed} failed, ${hourAgo}h ago`}</title>
-              </rect>
-            )}
-            {i % 4 === 0 && (
-              <text x={x + bw / 2} y={H + 14} textAnchor="middle" className="chart-tick">
-                {hourAgo === 0 ? "now" : `-${hourAgo}h`}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
+const STATE_COLORS = { completed: "var(--good)", failed: "var(--critical)", running: "var(--running)", cancelled: "var(--ink-4)" };
 
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [feed, setFeed] = useState<LoomEvent[]>([]);
   const navigate = useNavigate();
+  useCrumbs([{ label: "Dashboard" }]);
 
   const refresh = useCallback(() => {
     api.get<Stats>("/api/stats").then(setStats).catch(() => {});
-    api.get<Run[]>("/api/runs?limit=300").then(setRuns).catch(() => {});
+    api.get<Run[]>("/api/runs?limit=500").then(setRuns).catch(() => {});
+    api.get<Workflow[]>("/api/workflows").then(setWorkflows).catch(() => {});
   }, []);
-
   useEffect(refresh, [refresh]);
-
   useEvents((ev) => {
-    setFeed((prev) => [ev, ...prev].slice(0, 60));
-    if (ev.type === "run_updated" || ev.type === "ingested") refresh();
+    setFeed((prev) => [ev, ...prev].slice(0, 80));
+    if (ev.type === "run_updated" || ev.type === "ingested" || ev.type === "function_invoked") refresh();
   });
 
-  const successRate =
-    stats && stats.runs_completed + stats.runs_failed > 0
-      ? Math.round((stats.runs_completed / (stats.runs_completed + stats.runs_failed)) * 100)
-      : null;
+  const { activity, hourly, avgMs, medianMs } = useMemo(() => {
+    const now = Date.now();
+    const rows: Array<{ hour: string; state: string; count: number }> = [];
+    const hourly = new Array(24).fill(0);
+    const byHour = new Map<number, Record<string, number>>();
+    const durations: number[] = [];
+    for (const r of runs) {
+      const age = now - new Date(r.created_at).getTime();
+      if (age >= 0 && age <= 24 * 3600_000) {
+        const idx = 23 - Math.floor(age / 3600_000);
+        hourly[idx]++;
+        const rec = byHour.get(idx) ?? {};
+        rec[r.state] = (rec[r.state] ?? 0) + 1;
+        byHour.set(idx, rec);
+      }
+      if (r.started_at && r.finished_at && r.state === "completed") durations.push(new Date(r.finished_at).getTime() - new Date(r.started_at).getTime());
+    }
+    for (let i = 0; i < 24; i++) {
+      const label = i === 23 ? "now" : `-${23 - i}h`;
+      const rec = byHour.get(i) ?? {};
+      for (const st of ["completed", "failed", "running", "cancelled"]) rows.push({ hour: label, state: st, count: rec[st] ?? 0 });
+    }
+    durations.sort((a, b) => a - b);
+    return {
+      activity: rows,
+      hourly,
+      avgMs: durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null,
+      medianMs: durations.length ? durations[Math.floor(durations.length / 2)] : null,
+    };
+  }, [runs]);
+
+  const successRate = stats && stats.runs_completed + stats.runs_failed > 0 ? Math.round((stats.runs_completed / (stats.runs_completed + stats.runs_failed)) * 100) : null;
+  const active = runs.filter((r) => r.state === "running" || r.state === "pending");
+  const scheduled = workflows.filter((w) => w.spec.triggers.every_secs || w.spec.triggers.on_ingest).length;
 
   return (
-    <>
+    <div className="content">
       <div className="page-head">
         <div>
           <h1>Dashboard</h1>
-          <p>Live view of orchestration, workloads, and ingestion.</p>
+          <p>Orchestration, workloads, and ingestion, live.</p>
         </div>
       </div>
 
       <div className="tiles">
-        <Tile label="Workflows" value={stats?.workflows ?? "—"} />
-        <Tile label="Active runs" value={stats?.runs_running ?? "—"} tone="accent" />
-        <Tile
-          label="Success rate"
-          value={successRate === null ? "—" : `${successRate}%`}
-          sub={stats ? `${stats.runs_completed} ok / ${stats.runs_failed} failed` : undefined}
-          tone={successRate !== null && successRate < 80 ? "bad" : "good"}
-        />
-        <Tile label="Functions" value={stats?.functions ?? "—"} />
-        <Tile
-          label="Ingested"
-          value={stats ? formatBytes(stats.bytes_ingested) : "—"}
-          sub={stats ? `${stats.records_ingested.toLocaleString()} records` : undefined}
-        />
+        <Tile label="Runs · 24h" value={hourly.reduce((a, b) => a + b, 0)} sub={`${stats?.runs_total ?? "…"} all time`} spark={hourly} />
+        <Tile label="Active runs" value={stats?.runs_running ?? "—"} tone={active.length ? "accent" : undefined} sub={active.length ? active.map((r) => r.workflow_name).slice(0, 2).join(", ") : "nothing running"} />
+        <Tile label="Success rate" value={successRate === null ? "—" : `${successRate}%`} sub={stats ? `${stats.runs_completed} ok · ${stats.runs_failed} failed` : undefined} tone={successRate !== null && successRate < 80 ? "bad" : successRate !== null ? "good" : undefined} />
+        <Tile label="Median run time" value={medianMs !== null ? formatDuration(new Date(0).toISOString(), new Date(medianMs).toISOString()) : "—"} sub={avgMs !== null ? `avg ${Math.round(avgMs)}ms` : undefined} />
+        <Tile label="Workflows" value={stats?.workflows ?? "—"} sub={`${scheduled} scheduled · ${stats?.functions ?? 0} functions`} />
+        <Tile label="Ingested" value={stats ? formatBytes(stats.bytes_ingested) : "—"} sub={stats ? `${formatNumber(stats.records_ingested)} records · ${stats.datasets} datasets` : undefined} />
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Activity — last 24h</h2>
-          <span className="legend">
-            <span className="legend-swatch" style={{ background: "#34d399" }} /> completed
-            <span className="legend-swatch" style={{ background: "#f87171", marginLeft: 12 }} /> failed
-          </span>
+      <div className="grid-2" style={{ gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)" }}>
+        <div className="card">
+          <div className="card-head">
+            <h2>Runs by hour <span className="sub">last 24 hours</span></h2>
+          </div>
+          <div className="card-body" style={{ paddingBottom: 8 }}>
+            <Chart rows={activity} spec={{ mark: "bar", x: "hour", y: ["count"], color: "state", stack: true, agg: "sum" }} height={200} colors={STATE_COLORS} />
+          </div>
         </div>
-        <div className="card-body">
-          <ActivityChart runs={runs} />
+        <div className="card">
+          <div className="card-head">
+            <h2><Pulse size={15} /> Live activity</h2>
+            <span className="sub">{feed.length ? `${feed.length} recent events` : "streaming"}</span>
+          </div>
+          <div className="feed" style={{ maxHeight: 262 }}>
+            {feed.length === 0 ? (
+              <Empty title="Quiet for now" hint="Run, task, log, ingest, and invocation events stream here in real time." />
+            ) : (
+              feed.map((ev, i) => {
+                const d = describe(ev);
+                return (
+                  <div className="feed-item" key={i} style={{ cursor: d.to ? "pointer" : "default" }} onClick={() => d.to && navigate(d.to)}>
+                    <span className="ts">{new Date(ev.ts).toLocaleTimeString()}</span>
+                    <span className="k">{d.kind}</span>
+                    <span className="truncate">{d.text}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-head">
           <h2>Recent runs</h2>
+          <Link to="/runs" className="small">All runs <ArrowRight size={12} /></Link>
         </div>
         {runs.length === 0 ? (
-          <Empty title="No runs yet" hint="Trigger a workflow to see it here." />
+          <Empty title="No runs yet" hint="Trigger a workflow to see it here." action={<Link className="btn sm" to="/workflows">Go to workflows</Link>} />
         ) : (
           <table>
             <thead>
@@ -150,13 +150,9 @@ export default function Dashboard() {
             <tbody>
               {runs.slice(0, 8).map((r) => (
                 <tr key={r.id} className="rowlink" onClick={() => navigate(`/runs/${r.id}`)}>
-                  <td>{r.workflow_name}</td>
-                  <td>
-                    <StatusPill state={r.state} />
-                  </td>
-                  <td>
-                    <span className="trigger-chip">{r.trigger}</span>
-                  </td>
+                  <td className="primary">{r.workflow_name}</td>
+                  <td><StatusPill state={r.state} /></td>
+                  <td><span className="chip">{r.trigger}</span></td>
                   <td className="num">{formatDuration(r.started_at, r.finished_at)}</td>
                   <td className="num muted">{timeAgo(r.created_at)}</td>
                 </tr>
@@ -165,24 +161,6 @@ export default function Dashboard() {
           </table>
         )}
       </div>
-
-      <div className="card">
-        <div className="card-head">
-          <h2>Live activity</h2>
-        </div>
-        <div className="feed">
-          {feed.length === 0 ? (
-            <Empty title="Quiet for now" hint="Events stream here in real time." />
-          ) : (
-            feed.map((ev, i) => (
-              <div className="feed-item" key={i}>
-                <span className="ts">{new Date(ev.ts).toLocaleTimeString()}</span>
-                <span>{describe(ev)}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </>
+    </div>
   );
 }

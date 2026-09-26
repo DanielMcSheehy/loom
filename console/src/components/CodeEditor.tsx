@@ -15,7 +15,13 @@ export interface CodeEditorProps {
   minRows?: number;
   /** Invoked on Mod-Enter (run the cell / query). */
   onRun?: () => void;
+  /** Invoked on Shift-Enter (run and advance). */
+  onShiftRun?: () => void;
+  onEscape?: () => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
   autoFocus?: boolean;
+  lineNumbers?: boolean;
 }
 
 export default function CodeEditor(props: CodeEditorProps) {

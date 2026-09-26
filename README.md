@@ -38,21 +38,26 @@ binary, SQLite inside. No broker, no external database, no YAML.
   building block for notebooks and agents.
 - **Notebooks** — Observable-style executable documents in the console:
   markdown, code cells (any runtime), SQL cells, and charts in between.
-  Cells run against the live platform, chain — each cell's output reaches
-  the cells below as `inputs.prev` / `inputs[name]` — and results persist
-  with the document.
+  Cells run against the live platform and chain: each cell's output reaches
+  the cells below as `inputs.prev` / `inputs[name]`, and in reactive mode
+  the cells that read from a cell re-run automatically when it runs.
+  Every tabular result gets a data grid with column profiles and a chart
+  builder (bar, line, area, scatter, donut, histogram, stacking, colour by
+  column); results, chart specs, and view state persist with the document.
 - **External engines** — register **Postgres**, **ClickHouse**, or **chDB**
   (embedded ClickHouse) connectors and point any query — API, SDK, notebook
   cell, console — at them with `{"connector": "name"}`.
 - **MCP server** — `POST /mcp` speaks the Model Context Protocol
-  (streamable HTTP), exposing 13 tools (create/trigger workflows, execute
-  code, SQL, ingest, functions, notebooks) so AI agents can drive the whole
+  (streamable HTTP), exposing 15 tools (create/trigger/cancel workflows, execute
+  code, SQL, ingest, dataset profiling, functions, notebooks) so AI agents can drive the whole
   platform: `claude mcp add --transport http loom http://localhost:7420/mcp`.
 - **SDKs** — [Python](sdks/python) (`@task` decorators, zero deps) and
   [TypeScript](sdks/typescript) (`task()`/`flow()` builders, zero deps).
-- **Console** — a dark, real-time React UI: DAG viewer, run Gantt timeline,
-  live logs, 24h activity chart, notebooks, function playground, data
-  manager with SQL editor.
+- **Console** — a real-time React UI with light and dark themes and a ⌘K
+  command palette: DAG viewer, run Gantt timeline, live logs, run
+  cancellation, notebooks, function playground, and a data catalog with
+  server-side column profiles (`GET /api/datasets/{name}`) and a SQL
+  workbench with schema hints and history.
 
 ## The console
 
@@ -168,18 +173,21 @@ the SDK READMEs for streaming, functions, and ingestion.
 | `POST /api/workflows/{id}/trigger` | Start a run (`{"params": {...}}`) |
 | `GET /api/runs?workflow_id&limit` | Run history |
 | `GET /api/runs/{id}` | Run + task states, results, logs |
+| `POST /api/runs/{id}/cancel` | Cancel a pending/running run (202 + run; 409 if already terminal) |
 | `GET /api/events`, `GET /api/runs/{id}/events` | **SSE** live event streams |
 | `GET/POST /api/functions` | List / deploy serverless functions |
 | `GET/DELETE /api/functions/{name}` | Read / remove |
 | `POST /api/functions/{name}/invoke` | Invoke, JSON result + logs |
 | `POST /api/functions/{name}/invoke/stream` | Invoke, **SSE** logs then result |
 | `GET /api/datasets` | Ingested datasets |
+| `GET /api/datasets/{name}?sample=N` | Column profile (dtype, nulls, min/max/mean, distinct) + first N rows |
+| `DELETE /api/datasets/{name}` | Remove a dataset (file + registry) |
 | `POST /api/ingest/{dataset}` | **Streaming** NDJSON ingestion |
 | `POST /api/query` | SQL via embedded Polars, or `{"connector": name}` for Postgres/ClickHouse/chDB |
 | `POST /api/execute` | Run a Python/TS/JS snippet on the warm pool (`{"runtime", "code", "params", "inputs"}`) |
 | `GET/POST /api/connectors`, `DELETE /api/connectors/{name}` | External engine registry |
 | `GET/POST /api/notebooks`, `GET/PUT/DELETE /api/notebooks/{id}` | Notebook documents |
-| `POST /mcp` | Model Context Protocol endpoint (13 tools for AI agents) |
+| `POST /mcp` | Model Context Protocol endpoint (15 tools for AI agents) |
 
 ## Writing tasks
 

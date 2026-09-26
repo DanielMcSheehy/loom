@@ -19,7 +19,7 @@ use loom_executor::ExecRequest;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::orchestrator::launch_run;
+use crate::orchestrator::{cancel_run, launch_run, CancelOutcome};
 use crate::state::SharedState;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -105,6 +105,15 @@ fn tool_definitions() -> Vec<Value> {
             &["dataset", "records"],
         ),
         tool("list_datasets", "List ingested datasets with record/byte counts.", json!({}), &[]),
+        tool(
+            "describe_dataset",
+            "Profile a dataset: per-column dtype, null_count, min/max/mean, distinct count, plus the first rows as a sample.",
+            json!({
+                "name": {"type": "string"},
+                "sample": {"type": "integer", "description": "sample rows to return (default 20, max 200)"}
+            }),
+            &["name"],
+        ),
         tool("list_workflows", "List workflows with their DAG specs.", json!({}), &[]),
         tool(
             "create_workflow",
@@ -124,6 +133,12 @@ fn tool_definitions() -> Vec<Value> {
         tool(
             "get_run",
             "Get a run's state plus every task's state, result, error, and logs.",
+            json!({ "run_id": {"type": "string"} }),
+            &["run_id"],
+        ),
+        tool(
+            "cancel_run",
+            "Cancel a pending or running run. In-flight tasks are stopped and marked cancelled.",
             json!({ "run_id": {"type": "string"} }),
             &["run_id"],
         ),
@@ -177,8 +192,9 @@ async fn call_tool(state: &SharedState, params: &Value) -> Result<Value, String>
 async fn dispatch(state: &SharedState, tool: &str, args: Value) -> Result<Value, String> {
     let err = |e: &dyn std::fmt::Display| e.to_string();
     match tool {
-        "loom_stats" => serde_json::to_value(state.store.stats().map_err(|e| err(&e))?)
-            .map_err(|e| err(&e)),
+        "loom_stats" => {
+            serde_json::to_value(state.store.stats().map_err(|e| err(&e))?).map_err(|e| err(&e))
+        }
 
         "execute_code" => {
             let runtime: Runtime =
@@ -232,7 +248,9 @@ async fn dispatch(state: &SharedState, tool: &str, args: Value) -> Result<Value,
 
         "ingest" => {
             let dataset = args["dataset"].as_str().ok_or("missing dataset")?;
-            let records = args["records"].as_array().ok_or("records must be an array")?;
+            let records = args["records"]
+                .as_array()
+                .ok_or("records must be an array")?;
             let dir = state.data_dir.join("datasets");
             tokio::fs::create_dir_all(&dir).await.map_err(|e| err(&e))?;
             let mut payload = String::new();
@@ -257,9 +275,28 @@ async fn dispatch(state: &SharedState, tool: &str, args: Value) -> Result<Value,
             serde_json::to_value(ds).map_err(|e| err(&e))
         }
 
-        "list_datasets" => {
-            serde_json::to_value(state.store.list_datasets().map_err(|e| err(&e))?)
-                .map_err(|e| err(&e))
+        "list_datasets" => serde_json::to_value(state.store.list_datasets().map_err(|e| err(&e))?)
+            .map_err(|e| err(&e)),
+
+        "describe_dataset" => {
+            let name = args["name"].as_str().ok_or("missing name")?.to_string();
+            let sample = args["sample"].as_u64().unwrap_or(20).clamp(1, 200) as usize;
+            let ds = state.store.get_dataset(&name).map_err(|e| err(&e))?;
+            let path = state.dataset_path(&name);
+            let profile =
+                tokio::task::spawn_blocking(move || crate::data::describe_dataset(&path, sample))
+                    .await
+                    .map_err(|e| err(&e))??;
+            Ok(json!({
+                "name": ds.name,
+                "records": ds.records,
+                "bytes": ds.bytes,
+                "created_at": ds.created_at,
+                "updated_at": ds.updated_at,
+                "columns": profile.columns,
+                "sample": profile.sample,
+                "sample_size": profile.sample_size,
+            }))
         }
 
         "list_workflows" => {
@@ -321,6 +358,19 @@ async fn dispatch(state: &SharedState, tool: &str, args: Value) -> Result<Value,
             let run = state.store.get_run(id).map_err(|e| err(&e))?;
             let tasks = state.store.list_task_runs(id).map_err(|e| err(&e))?;
             Ok(json!({ "run": run, "tasks": tasks }))
+        }
+
+        "cancel_run" => {
+            let id: Uuid = args["run_id"]
+                .as_str()
+                .and_then(|s| Uuid::parse_str(s).ok())
+                .ok_or("run_id must be a uuid")?;
+            match cancel_run(state, id).map_err(|e| err(&e))? {
+                CancelOutcome::Cancelled(run) => serde_json::to_value(run).map_err(|e| err(&e)),
+                CancelOutcome::AlreadyTerminal(run) => {
+                    Err(format!("run is already {}", run.state.as_str()))
+                }
+            }
         }
 
         "list_runs" => {

@@ -109,6 +109,7 @@ export default function DagGraph({
         {placed.map(({ id, task, x, y }) => (
           <g key={id} className={`dag-node ${states?.[id] ?? ""}`} transform={`translate(${x},${y})`}>
             <rect width={NODE_W} height={NODE_H} rx="8" />
+            {states && <circle className="state-dot" cx={NODE_W - 14} cy={16} r={4} />}
             <text x="14" y="22">
               {(task.name ?? id).slice(0, 18)}
             </text>

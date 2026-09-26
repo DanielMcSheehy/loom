@@ -1,130 +1,107 @@
-// Shared renderer for query/execution results: table for row arrays with an
-// optional chart view, JSON for everything else.
+// Shared renderer for query / execution results: tabular data gets the data
+// grid + chart builder; everything else a JSON tree or a scalar readout.
+import { ChartBar, Code, Table } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import type { ChartConfig } from "../types";
-import { CodeBlock } from "./CodeEditor";
-import MiniChart from "./MiniChart";
+import ChartBuilder, { defaultSpec } from "./charts/ChartBuilder";
+import { inferColumns, type Row } from "./charts/data";
+import DataGrid from "./DataGrid";
+import JsonView from "./JsonView";
 
-export function rowsOf(value: unknown): Array<Record<string, unknown>> | null {
+export function rowsOf(value: unknown): Row[] | null {
   if (Array.isArray(value) && value.length > 0 && value.every((v) => v && typeof v === "object" && !Array.isArray(v))) {
-    return value as Array<Record<string, unknown>>;
+    return value as Row[];
   }
   return null;
 }
+
+/** Older notebooks stored `{kind, x, y}`; lift them into the new spec. */
+export function migrateChart(c: unknown): ChartConfig | null {
+  if (!c || typeof c !== "object") return null;
+  const o = c as Record<string, unknown>;
+  if (typeof o.kind === "string" && typeof o.x === "string" && typeof o.y === "string") {
+    return { mark: o.kind === "line" ? "line" : "bar", x: o.x, y: [o.y] };
+  }
+  if (typeof o.mark === "string" && typeof o.x === "string" && Array.isArray(o.y)) return o as unknown as ChartConfig;
+  return null;
+}
+
+export type ResultTab = "table" | "chart" | "json";
 
 export default function ResultView({
   value,
   chart,
   onChart,
+  view,
+  onView,
+  filename,
+  maxHeight,
 }: {
   value: unknown;
   chart?: ChartConfig | null;
-  /** When provided, the chart controls are shown and changes reported up. */
   onChart?: (c: ChartConfig | null) => void;
+  /** Controlled active tab (persisted by notebooks); uncontrolled otherwise. */
+  view?: ResultTab;
+  onView?: (v: ResultTab) => void;
+  filename?: string;
+  maxHeight?: number;
 }) {
   const rows = rowsOf(value);
-  const columns = useMemo(() => (rows ? Object.keys(rows[0]) : []), [rows]);
-  const numericColumns = useMemo(
-    () => (rows ? columns.filter((c) => rows.some((r) => Number.isFinite(Number(r[c])))) : []),
-    [rows, columns],
-  );
-  const [localChart, setLocalChart] = useState<ChartConfig | null>(chart ?? null);
-  const active = chart !== undefined ? chart : localChart;
-
+  const cols = useMemo(() => (rows ? inferColumns(rows) : []), [rows]);
+  const [localView, setLocalView] = useState<ResultTab>(chart ? "chart" : "table");
+  const [localChart, setLocalChart] = useState<ChartConfig | null>(migrateChart(chart));
+  const active = view ?? localView;
+  const spec = onChart ? migrateChart(chart) : localChart;
+  const setView = (v: ResultTab) => {
+    setLocalView(v);
+    onView?.(v);
+  };
   const setChart = (c: ChartConfig | null) => {
     setLocalChart(c);
     onChart?.(c);
   };
 
   if (!rows) {
-    const json = JSON.stringify(value, null, 2);
-    const truncated = json.length > 4000;
-    const display = truncated ? json.slice(0, 4000) + "\n\n… truncated " + (json.length - 4000) + " chars" : json;
-    return (
-      <>
-        <CodeBlock code={display} language="json" />
-        {truncated && <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>Showing first 4000 chars — truncated.</p>}
-      </>
-    );
+    if (value === null || value === undefined || typeof value !== "object") {
+      return <div className="scalar-out">{value === undefined ? "undefined" : JSON.stringify(value)}</div>;
+    }
+    return <JsonView value={value} />;
   }
 
+  const numericCount = cols.filter((c) => c.type === "number").length;
   return (
-    <div>
-      <div className="result-toolbar">
-        <span className="muted">{rows.length.toLocaleString()} rows</span>
+    <div className="result-frame">
+      <div className="result-tabs">
         <div className="seg">
-          <button className={!active ? "on" : ""} onClick={() => setChart(null)}>
-            table
+          <button className={active === "table" ? "on" : ""} onClick={() => setView("table")}>
+            <Table size={13} /> Table
           </button>
           <button
-            className={active?.kind === "bar" ? "on" : ""}
-            disabled={numericColumns.length === 0}
-            onClick={() =>
-              setChart({ kind: "bar", x: active?.x ?? columns[0], y: active?.y ?? numericColumns[0] })
-            }
+            className={active === "chart" ? "on" : ""}
+            disabled={numericCount === 0}
+            title={numericCount === 0 ? "No numeric columns to chart" : "Chart"}
+            onClick={() => {
+              if (!spec) setChart(defaultSpec(rows, cols));
+              setView("chart");
+            }}
           >
-            bar
+            <ChartBar size={13} /> Chart
           </button>
-          <button
-            className={active?.kind === "line" ? "on" : ""}
-            disabled={numericColumns.length === 0}
-            onClick={() =>
-              setChart({ kind: "line", x: active?.x ?? columns[0], y: active?.y ?? numericColumns[0] })
-            }
-          >
-            line
+          <button className={active === "json" ? "on" : ""} onClick={() => setView("json")}>
+            <Code size={13} /> JSON
           </button>
         </div>
-        {active && (
-          <>
-            <label className="inline-select">
-              x
-              <select value={active.x} onChange={(e) => setChart({ ...active, x: e.target.value })}>
-                {columns.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
-            </label>
-            <label className="inline-select">
-              y
-              <select value={active.y} onChange={(e) => setChart({ ...active, y: e.target.value })}>
-                {numericColumns.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
+        <span className="grow" />
+        <span>
+          {rows.length.toLocaleString()} rows · {cols.length} cols
+        </span>
       </div>
-      {active ? (
-        <MiniChart rows={rows} x={active.x} y={active.y} kind={active.kind} />
-      ) : (
-        <div className="result-table">
-          <table>
-            <thead>
-              <tr>
-                {columns.map((c) => (
-                  <th key={c}>{c}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 25).map((row, i) => (
-                <tr key={i}>
-                  {columns.map((c) => (
-                    <td key={c} className="mono">
-                      {typeof row[c] === "object" ? JSON.stringify(row[c]) : String(row[c] ?? "")}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {rows.length > 25 && (
-            <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-              Showing 25 of {rows.length} rows — truncated. Use LIMIT.
-            </p>
-          )}
+      {active === "table" && <DataGrid rows={rows} columns={cols} filename={filename} maxHeight={maxHeight} />}
+      {active === "chart" && (spec ? <ChartBuilder rows={rows} spec={spec} columns={cols} onChange={setChart} /> : <div className="chart-empty">No numeric columns to plot.</div>)}
+      {active === "json" && (
+        <div style={{ padding: 8 }}>
+          <JsonView value={rows.length > 200 ? rows.slice(0, 200) : rows} />
+          {rows.length > 200 && <p className="muted small" style={{ margin: "6px 4px 0" }}>Showing the first 200 of {rows.length.toLocaleString()} rows.</p>}
         </div>
       )}
     </div>

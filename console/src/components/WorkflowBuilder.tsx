@@ -258,7 +258,7 @@ export default function WorkflowBuilder({
         </button>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && <div className="banner error">{error}</div>}
 
       {mode === "json" ? (
         <CodeEditor value={jsonDraft} language="json" minRows={18} onChange={setJsonDraft} />

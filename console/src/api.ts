@@ -75,3 +75,40 @@ export function timeAgo(iso: string): string {
   if (s < 86_400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86_400)}d ago`;
 }
+
+export function formatNumber(n: number): string {
+  if (!Number.isFinite(n)) return String(n);
+  const abs = Math.abs(n);
+  const compact = (v: number, unit: string, decimals: number) => `${v.toFixed(decimals).replace(/\.0$/, "")}${unit}`;
+  if (abs >= 1_000_000_000) return compact(n / 1_000_000_000, "B", abs >= 1e10 ? 0 : 1);
+  if (abs >= 1_000_000) return compact(n / 1_000_000, "M", abs >= 1e7 ? 0 : 1);
+  if (abs >= 10_000) return compact(n / 1_000, "K", abs >= 1e5 ? 0 : 1);
+  if (Number.isInteger(n)) return n.toLocaleString();
+  return abs < 1 ? n.toPrecision(3) : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+export function formatMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+}
+
+export function download(filename: string, content: string, type = "text/plain") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function toCsv(rows: Array<Record<string, unknown>>): string {
+  if (rows.length === 0) return "";
+  const cols = Object.keys(rows[0]);
+  const esc = (v: unknown) => {
+    const s = v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+}

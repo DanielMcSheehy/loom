@@ -33,8 +33,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
 
-pub use isolation::{ContainerConfig, Isolation};
 use isolation::LaunchPlan;
+pub use isolation::{ContainerConfig, Isolation};
 use pool::{PoolKind, WorkerPool};
 
 const PYTHON_SHIM: &str = include_str!("../shims/worker.py");
@@ -80,9 +80,17 @@ pub struct ExecOutcome {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum WorkerEvent {
-    Log { line: String },
-    Result { value: Value },
-    Error { message: String, #[serde(default)] trace: String },
+    Log {
+        line: String,
+    },
+    Result {
+        value: Value,
+    },
+    Error {
+        message: String,
+        #[serde(default)]
+        trace: String,
+    },
 }
 
 /// Spawns worker processes. Cheap to clone via `Arc`; keeps the shim files
@@ -113,9 +121,14 @@ impl Executor {
             .map(|v| v != "0")
             .unwrap_or(true);
         let pool = match &isolation {
-            Isolation::Process { python_bin, node_bin } if pool_enabled => Some(
-                WorkerPool::new(python_bin.clone(), node_bin.clone(), shim_dir.path()),
-            ),
+            Isolation::Process {
+                python_bin,
+                node_bin,
+            } if pool_enabled => Some(WorkerPool::new(
+                python_bin.clone(),
+                node_bin.clone(),
+                shim_dir.path(),
+            )),
             _ => None,
         };
         tracing::info!(
@@ -136,6 +149,16 @@ impl Executor {
 
     /// Execute a workload, streaming each log line into `log_tx` as it is
     /// produced by the worker process.
+    ///
+    /// Cancellation safety: dropping the returned future mid-job (e.g. from
+    /// a `tokio::select!` racing a cancellation token) kills the worker.
+    /// In pooled mode the `PooledWorker` is owned by the future and is only
+    /// handed back via `pool.checkin` after a clean protocol finish, so a
+    /// dropped future drops the worker and `kill_on_drop` reaps the process
+    /// — it can never be checked back in mid-job. In oneshot mode the
+    /// `Child` is likewise killed on drop; for container/microVM isolation a
+    /// [`ContainerGuard`] additionally asks the engine to kill the sandbox by
+    /// name, since SIGKILLing the client alone would orphan it.
     pub async fn execute(
         &self,
         req: ExecRequest,
@@ -161,7 +184,8 @@ impl Executor {
             "params": req.params,
             "inputs": req.inputs,
         }))
-        .expect("request serializes") + "\n";
+        .expect("request serializes")
+            + "\n";
 
         let kind = match req.runtime {
             Runtime::Python => PoolKind::Python,
@@ -170,7 +194,12 @@ impl Executor {
         let mut worker = pool.checkout(kind)?;
         // An idle worker may have died while parked; if the handoff write
         // fails the job hasn't started, so retry once on a fresh spawn.
-        if worker.stdin.write_all(request_line.as_bytes()).await.is_err() {
+        if worker
+            .stdin
+            .write_all(request_line.as_bytes())
+            .await
+            .is_err()
+        {
             worker = pool.spawn_fresh(kind)?;
             worker.stdin.write_all(request_line.as_bytes()).await?;
         }
@@ -260,12 +289,16 @@ impl Executor {
             .kill_on_drop(true);
 
         let mut child = cmd.spawn()?;
+        // Armed until the job finishes: if this future is dropped mid-job
+        // (cancellation), the guard kills the container/microVM by name.
+        let mut guard = ContainerGuard::new(&plan);
         let request_line = serde_json::to_string(&json!({
             "entry": plan.entry,
             "params": req.params,
             "inputs": req.inputs,
         }))
-        .expect("request serializes") + "\n";
+        .expect("request serializes")
+            + "\n";
 
         let mut stdin = child.stdin.take().expect("stdin piped");
         stdin.write_all(request_line.as_bytes()).await?;
@@ -279,11 +312,13 @@ impl Executor {
         let outcome = match tokio::time::timeout(timeout, work).await {
             Ok(outcome) => outcome,
             Err(_) => {
+                guard.disarm();
                 let _ = child.kill().await;
                 kill_container(&plan).await;
                 return Err(ExecError::Timeout(req.timeout_secs));
             }
         };
+        guard.disarm();
         // Reap the child so it doesn't linger as a zombie.
         let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
 
@@ -351,7 +386,6 @@ impl Executor {
             None => Err(ExecError::NoResult),
         }
     }
-
 }
 
 /// Write the job code into a fresh scratch dir; returns the dir guard and
@@ -369,6 +403,43 @@ fn write_job_dir(req: &ExecRequest) -> Result<(tempfile::TempDir, &'static str),
 
 fn parse_event(line: &str) -> Result<WorkerEvent, ExecError> {
     serde_json::from_str(line).map_err(|e| ExecError::Protocol(format!("{e}: {line}")))
+}
+
+/// Drop guard for container/microVM jobs: if the executing future is dropped
+/// before the job finished (cancellation), kill the sandbox by name so it
+/// doesn't outlive its client. Disarmed on every normal exit path. Uses a
+/// plain OS thread so it needs no async runtime at drop time.
+struct ContainerGuard {
+    program: String,
+    container_name: Option<String>,
+}
+
+impl ContainerGuard {
+    fn new(plan: &LaunchPlan) -> Self {
+        ContainerGuard {
+            program: plan.program.clone(),
+            container_name: plan.container_name.clone(),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.container_name = None;
+    }
+}
+
+impl Drop for ContainerGuard {
+    fn drop(&mut self) {
+        if let Some(name) = self.container_name.take() {
+            let program = self.program.clone();
+            std::thread::spawn(move || {
+                let _ = std::process::Command::new(program)
+                    .args(["kill", &name])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .output();
+            });
+        }
+    }
 }
 
 /// SIGKILLing the engine client on timeout can orphan the container/microVM;
@@ -406,7 +477,10 @@ def handler(params, inputs):
     print("crunching", params["n"], "items")
     return {"doubled": params["n"] * 2}
 "#;
-        let out = exec.execute(req(Runtime::Python, code), None).await.unwrap();
+        let out = exec
+            .execute(req(Runtime::Python, code), None)
+            .await
+            .unwrap();
         assert_eq!(out.value, json!({"doubled": 8}));
         assert!(out.logs.iter().any(|l| l.contains("crunching")));
     }
@@ -457,14 +531,25 @@ export async function handler(params, inputs) {
     #[tokio::test]
     async fn pool_reuses_warm_interpreters() {
         let exec = Executor::new().unwrap();
-        let pool = exec.pool.as_ref().expect("pool on by default in process mode");
+        let pool = exec
+            .pool
+            .as_ref()
+            .expect("pool on by default in process mode");
         assert_eq!(pool.idle_count(PoolKind::Python), 0);
 
         let code = "def handler(params, inputs):\n    return params['n']\n";
-        exec.execute(req(Runtime::Python, code), None).await.unwrap();
-        assert_eq!(pool.idle_count(PoolKind::Python), 1, "worker parked after job");
+        exec.execute(req(Runtime::Python, code), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            pool.idle_count(PoolKind::Python),
+            1,
+            "worker parked after job"
+        );
 
-        exec.execute(req(Runtime::Python, code), None).await.unwrap();
+        exec.execute(req(Runtime::Python, code), None)
+            .await
+            .unwrap();
         assert_eq!(
             pool.idle_count(PoolKind::Python),
             1,
@@ -480,9 +565,16 @@ export async function handler(params, inputs) {
         let good = "def handler(params, inputs):\n    return 'ok'\n";
 
         assert!(exec.execute(req(Runtime::Python, bad), None).await.is_err());
-        assert_eq!(pool.idle_count(PoolKind::Python), 1, "clean failure keeps worker");
+        assert_eq!(
+            pool.idle_count(PoolKind::Python),
+            1,
+            "clean failure keeps worker"
+        );
 
-        let out = exec.execute(req(Runtime::Python, good), None).await.unwrap();
+        let out = exec
+            .execute(req(Runtime::Python, good), None)
+            .await
+            .unwrap();
         assert_eq!(out.value, json!("ok"));
     }
 
@@ -493,13 +585,23 @@ export async function handler(params, inputs) {
         let js = "export const handler = (p) => p.n * 2;\n";
         let ts = "export const handler = (p: { n: number }): number => p.n * 3;\n";
 
-        let a = exec.execute(req(Runtime::Javascript, js), None).await.unwrap();
+        let a = exec
+            .execute(req(Runtime::Javascript, js), None)
+            .await
+            .unwrap();
         assert_eq!(a.value, json!(8));
         assert_eq!(pool.idle_count(PoolKind::Node), 1);
 
-        let b = exec.execute(req(Runtime::Typescript, ts), None).await.unwrap();
+        let b = exec
+            .execute(req(Runtime::Typescript, ts), None)
+            .await
+            .unwrap();
         assert_eq!(b.value, json!(12));
-        assert_eq!(pool.idle_count(PoolKind::Node), 1, "TS reused the JS worker");
+        assert_eq!(
+            pool.idle_count(PoolKind::Node),
+            1,
+            "TS reused the JS worker"
+        );
     }
 
     #[tokio::test]
@@ -507,7 +609,9 @@ export async function handler(params, inputs) {
         let exec = Executor::new().unwrap();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let code = "def handler(params, inputs):\n    print('line-1')\n    print('line-2')\n    return None\n";
-        exec.execute(req(Runtime::Python, code), Some(tx)).await.unwrap();
+        exec.execute(req(Runtime::Python, code), Some(tx))
+            .await
+            .unwrap();
         let mut streamed = Vec::new();
         while let Ok(line) = rx.try_recv() {
             streamed.push(line);

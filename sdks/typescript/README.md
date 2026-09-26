@@ -52,6 +52,9 @@ for await (const event of client.streamRun(run.id)) {
 }
 ```
 
+Stop a run that is still pending/running: `await client.cancelRun(run.id)`
+(resolves with the cancelled run; rejects with a 409 `LoomError` if it already finished).
+
 ## Serverless functions & ingestion
 
 ```ts
@@ -62,4 +65,7 @@ await client.createFunction({
 const { result } = await client.invoke("hello", { name: "loom" });
 
 await client.ingest("sensor-readings", [{ sensor: "a", v: 1 }, { sensor: "b", v: 2 }]);
+const profile = await client.describeDataset("sensor-readings", { sample: 5 }); // columns + row sample
+console.log(profile.columns); // [{ name: "v", dtype: "integer", min: 1, max: 2, mean: 1.5, ... }, ...]
+await client.deleteDataset("sensor-readings"); // file + registry row
 ```

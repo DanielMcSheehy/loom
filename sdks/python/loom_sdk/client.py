@@ -110,6 +110,11 @@ class LoomClient:
         """Returns ``{"run": ..., "tasks": [...]}``."""
         return self._request("GET", f"/api/runs/{run_id}")
 
+    def cancel_run(self, run_id: str) -> dict[str, Any]:
+        """Cancel a pending/running run; returns the (now cancelled) run.
+        Raises ``LoomError`` (409) if the run already finished."""
+        return self._request("POST", f"/api/runs/{run_id}/cancel")
+
     # ── serverless functions ─────────────────────────────────────────────
 
     def create_function(
@@ -154,6 +159,14 @@ class LoomClient:
 
     def list_datasets(self) -> list[dict[str, Any]]:
         return self._request("GET", "/api/datasets")
+
+    def describe_dataset(self, name: str, sample: int = 20) -> dict[str, Any]:
+        """Column profile (dtype, nulls, min/max/mean, distinct) plus the
+        first ``sample`` rows (1..=200)."""
+        return self._request("GET", f"/api/datasets/{name}?sample={sample}")
+
+    def delete_dataset(self, name: str) -> None:
+        self._request("DELETE", f"/api/datasets/{name}")
 
     def query(
         self, sql: str, limit: int = 10_000, connector: Optional[str] = None

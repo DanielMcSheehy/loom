@@ -39,11 +39,17 @@ pub enum LoomEvent {
 
 impl LoomEvent {
     pub fn run_updated(run: Run) -> Self {
-        LoomEvent::RunUpdated { ts: Utc::now(), run }
+        LoomEvent::RunUpdated {
+            ts: Utc::now(),
+            run,
+        }
     }
 
     pub fn task_updated(task: TaskRun) -> Self {
-        LoomEvent::TaskUpdated { ts: Utc::now(), task }
+        LoomEvent::TaskUpdated {
+            ts: Utc::now(),
+            task,
+        }
     }
 
     pub fn log(run_id: Uuid, task_id: impl Into<String>, line: impl Into<String>) -> Self {

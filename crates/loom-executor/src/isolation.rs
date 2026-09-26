@@ -28,7 +28,10 @@ pub const GUEST_JOB_DIR: &str = "/loom/job";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Isolation {
     /// Direct child processes of the server (default).
-    Process { python_bin: String, node_bin: String },
+    Process {
+        python_bin: String,
+        node_bin: String,
+    },
     /// One container per task execution.
     Container(ContainerConfig),
     /// One microVM per task execution, via a VM-backed OCI runtime.
@@ -66,9 +69,7 @@ impl Default for ContainerConfig {
 
 #[derive(Debug, thiserror::Error)]
 pub enum IsolationError {
-    #[error(
-        "unknown LOOM_ISOLATION `{0}` (expected `process`, `container`, or `microvm`)"
-    )]
+    #[error("unknown LOOM_ISOLATION `{0}` (expected `process`, `container`, or `microvm`)")]
     UnknownMode(String),
 }
 
@@ -166,13 +167,12 @@ pub fn plan(
     nonce: &str,
 ) -> LaunchPlan {
     match isolation {
-        Isolation::Process { python_bin, node_bin } => {
-            let mut argv = interpreter_args(
-                runtime,
-                python_bin,
-                node_bin,
-                &shim_dir.to_string_lossy(),
-            );
+        Isolation::Process {
+            python_bin,
+            node_bin,
+        } => {
+            let mut argv =
+                interpreter_args(runtime, python_bin, node_bin, &shim_dir.to_string_lossy());
             let program = argv.remove(0);
             LaunchPlan {
                 program,
@@ -210,7 +210,10 @@ pub fn plan(
                 args.push(rt.clone());
             }
             args.push("-v".into());
-            args.push(format!("{}:{GUEST_SHIM_DIR}:ro", shim_dir.to_string_lossy()));
+            args.push(format!(
+                "{}:{GUEST_SHIM_DIR}:ro",
+                shim_dir.to_string_lossy()
+            ));
             args.push("-v".into());
             args.push(format!("{}:{GUEST_JOB_DIR}:ro", job_dir.to_string_lossy()));
             args.push(image.clone());
@@ -245,7 +248,14 @@ mod tests {
     #[test]
     fn process_mode_runs_interpreter_directly() {
         let (shim, job) = dirs();
-        let p = plan(&process_isolation(), Runtime::Python, &shim, &job, "job.py", "n1");
+        let p = plan(
+            &process_isolation(),
+            Runtime::Python,
+            &shim,
+            &job,
+            "job.py",
+            "n1",
+        );
         assert_eq!(p.program, "python3");
         assert_eq!(p.args, vec!["/host/shims/worker.py"]);
         assert_eq!(p.entry, "/host/job-1/job.py");
@@ -255,7 +265,14 @@ mod tests {
     #[test]
     fn process_mode_typescript_gets_strip_types() {
         let (shim, job) = dirs();
-        let p = plan(&process_isolation(), Runtime::Typescript, &shim, &job, "job.ts", "n1");
+        let p = plan(
+            &process_isolation(),
+            Runtime::Typescript,
+            &shim,
+            &job,
+            "job.ts",
+            "n1",
+        );
         assert_eq!(p.program, "node");
         assert_eq!(
             p.args,
@@ -283,7 +300,10 @@ mod tests {
         assert!(joined.contains("-v /host/shims:/loom/shim:ro"));
         assert!(joined.contains("-v /host/job-1:/loom/job:ro"));
         assert!(joined.contains("python:3.12-slim python3 /loom/shim/worker.py"));
-        assert!(!joined.contains("--runtime"), "no runtime class unless configured");
+        assert!(
+            !joined.contains("--runtime"),
+            "no runtime class unless configured"
+        );
         assert_eq!(p.entry, "/loom/job/job.py");
         assert_eq!(p.container_name.as_deref(), Some("loom-worker-abc123"));
     }

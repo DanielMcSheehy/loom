@@ -50,8 +50,8 @@ async fn main() -> anyhow::Result<()> {
     // Serve the built console when present (docker / production).
     if console_dist.join("index.html").exists() {
         info!("serving console from {}", console_dist.display());
-        let spa = ServeDir::new(&console_dist)
-            .fallback(ServeFile::new(console_dist.join("index.html")));
+        let spa =
+            ServeDir::new(&console_dist).fallback(ServeFile::new(console_dist.join("index.html")));
         app = app.fallback_service(spa);
     }
 

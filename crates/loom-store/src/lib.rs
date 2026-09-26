@@ -76,13 +76,17 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Store { conn: Mutex::new(conn) })
+        Ok(Store {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Store { conn: Mutex::new(conn) })
+        Ok(Store {
+            conn: Mutex::new(conn),
+        })
     }
 
     // ── workflows ────────────────────────────────────────────────────────
@@ -92,7 +96,12 @@ impl Store {
         self.conn.lock().execute(
             "INSERT INTO workflows (id, name, data, updated_at) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(id) DO UPDATE SET name = ?2, data = ?3, updated_at = ?4",
-            params![wf.id.to_string(), wf.spec.name, data, wf.updated_at.to_rfc3339()],
+            params![
+                wf.id.to_string(),
+                wf.spec.name,
+                data,
+                wf.updated_at.to_rfc3339()
+            ],
         )?;
         Ok(())
     }
@@ -172,7 +181,8 @@ impl Store {
                     "SELECT data FROM runs WHERE workflow_id = ?1
                      ORDER BY created_at DESC LIMIT ?2",
                 )?;
-                let rows = stmt.query_map(params![wf.to_string(), limit], |r| r.get::<_, String>(0))?;
+                let rows =
+                    stmt.query_map(params![wf.to_string(), limit], |r| r.get::<_, String>(0))?;
                 collect_json(rows)
             }
             None => {
@@ -186,7 +196,11 @@ impl Store {
 
     /// Most recent scheduled run for a workflow — used by the scheduler to
     /// decide whether an interval trigger is due.
-    pub fn latest_run_created_at(&self, workflow_id: Uuid, trigger: &str) -> Result<Option<String>> {
+    pub fn latest_run_created_at(
+        &self,
+        workflow_id: Uuid,
+        trigger: &str,
+    ) -> Result<Option<String>> {
         let conn = self.conn.lock();
         let ts: Option<String> = conn
             .query_row(
@@ -309,6 +323,32 @@ impl Store {
         collect_json(rows)
     }
 
+    pub fn get_dataset(&self, name: &str) -> Result<Dataset> {
+        let conn = self.conn.lock();
+        let data: Option<String> = conn
+            .query_row(
+                "SELECT data FROM datasets WHERE name = ?1",
+                params![name],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match data {
+            Some(d) => Ok(serde_json::from_str(&d)?),
+            None => Err(StoreError::NotFound(format!("dataset {name}"))),
+        }
+    }
+
+    pub fn delete_dataset(&self, name: &str) -> Result<()> {
+        let n = self
+            .conn
+            .lock()
+            .execute("DELETE FROM datasets WHERE name = ?1", params![name])?;
+        if n == 0 {
+            return Err(StoreError::NotFound(format!("dataset {name}")));
+        }
+        Ok(())
+    }
+
     // ── connectors ───────────────────────────────────────────────────────
 
     pub fn put_connector(&self, c: &Connector) -> Result<()> {
@@ -404,7 +444,8 @@ impl Store {
     pub fn stats(&self) -> Result<Stats> {
         let conn = self.conn.lock();
         let count = |sql: &str| -> rusqlite::Result<u64> {
-            conn.query_row(sql, [], |r| r.get::<_, i64>(0)).map(|n| n as u64)
+            conn.query_row(sql, [], |r| r.get::<_, i64>(0))
+                .map(|n| n as u64)
         };
         let run_count = |state: RunState| -> rusqlite::Result<u64> {
             conn.query_row(
@@ -544,5 +585,22 @@ mod tests {
         store.put_function(&f).unwrap();
         assert_eq!(store.get_function("resize").unwrap().invocations, 3);
         assert_eq!(store.list_functions().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn datasets_get_and_delete() {
+        let store = Store::open_in_memory().unwrap();
+        store.record_ingest("events", 10, 2048).unwrap();
+        assert_eq!(store.get_dataset("events").unwrap().records, 10);
+        store.delete_dataset("events").unwrap();
+        assert!(matches!(
+            store.get_dataset("events"),
+            Err(StoreError::NotFound(_))
+        ));
+        assert!(matches!(
+            store.delete_dataset("events"),
+            Err(StoreError::NotFound(_))
+        ));
+        assert!(store.list_datasets().unwrap().is_empty());
     }
 }

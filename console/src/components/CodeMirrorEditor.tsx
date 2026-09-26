@@ -53,7 +53,7 @@ import type { CodeLanguage } from "./CodeBlock";
 const loomTheme = EditorView.theme(
   {
     "&": {
-      backgroundColor: "var(--page)",
+      backgroundColor: "transparent",
       color: "var(--ink-2)",
       fontSize: "12.5px",
       borderRadius: "var(--radius-sm)",
@@ -69,9 +69,9 @@ const loomTheme = EditorView.theme(
     ".cm-content": { caretColor: "var(--ink)", padding: "8px 0" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--ink)" },
     "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground":
-      { background: "rgba(109, 141, 255, 0.22)" },
-    ".cm-selectionMatch": { background: "rgba(34, 211, 238, 0.16)" },
-    ".cm-activeLine": { background: "rgba(148, 163, 184, 0.05)" },
+      { background: "var(--accent-ring)" },
+    ".cm-selectionMatch": { background: "var(--accent-soft)" },
+    ".cm-activeLine": { background: "var(--surface-2)" },
     ".cm-activeLineGutter": { background: "transparent", color: "var(--ink-2)" },
     ".cm-gutters": {
       background: "transparent",
@@ -81,8 +81,8 @@ const loomTheme = EditorView.theme(
     },
     ".cm-foldGutter .cm-gutterElement": { color: "var(--ink-3)" },
     ".cm-matchingBracket": {
-      background: "rgba(34, 211, 238, 0.18)",
-      outline: "1px solid rgba(34, 211, 238, 0.45)",
+      background: "var(--accent-soft)",
+      outline: "1px solid var(--accent-ring)",
     },
     ".cm-nonmatchingBracket": { background: "var(--critical-soft)" },
     ".cm-tooltip": {
@@ -90,7 +90,7 @@ const loomTheme = EditorView.theme(
       border: "1px solid var(--border-strong)",
       borderRadius: "8px",
       color: "var(--ink-2)",
-      boxShadow: "0 12px 32px -8px rgba(2, 6, 18, 0.8)",
+      boxShadow: "var(--shadow-lg)",
       overflow: "hidden",
     },
     ".cm-tooltip.cm-tooltip-autocomplete > ul": {
@@ -105,7 +105,7 @@ const loomTheme = EditorView.theme(
     ".cm-completionIcon": { color: "var(--ink-3)" },
     ".cm-completionMatchedText": {
       textDecoration: "none",
-      color: "var(--cyan)",
+      color: "var(--accent)",
       fontWeight: "650",
     },
     ".cm-panels": {
@@ -113,22 +113,22 @@ const loomTheme = EditorView.theme(
       color: "var(--ink-2)",
       borderTop: "1px solid var(--border)",
     },
-    ".cm-searchMatch": { background: "rgba(251, 191, 36, 0.25)" },
-    ".cm-searchMatch-selected": { background: "rgba(251, 191, 36, 0.45)" },
+    ".cm-searchMatch": { background: "var(--warning-soft)" },
+    ".cm-searchMatch-selected": { background: "var(--warning)" },
   },
-  { dark: true },
+  {},
 );
 
 const loomHighlight = HighlightStyle.define([
-  { tag: [t.keyword, t.moduleKeyword, t.controlKeyword, t.operatorKeyword], color: "var(--violet)" },
-  { tag: [t.string, t.special(t.string), t.regexp], color: "#5eead4" },
-  { tag: [t.number, t.bool, t.atom, t.null], color: "var(--warning)" },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "var(--sky)" },
-  { tag: [t.typeName, t.className, t.namespace, t.standard(t.variableName)], color: "var(--cyan)" },
-  { tag: [t.propertyName, t.attributeName], color: "#93b4ff" },
+  { tag: [t.keyword, t.moduleKeyword, t.controlKeyword, t.operatorKeyword], color: "var(--s7)" },
+  { tag: [t.string, t.special(t.string), t.regexp], color: "var(--s3)" },
+  { tag: [t.number, t.bool, t.atom, t.null], color: "var(--s2)" },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "var(--s1)" },
+  { tag: [t.typeName, t.className, t.namespace, t.standard(t.variableName)], color: "var(--s5)" },
+  { tag: [t.propertyName, t.attributeName], color: "var(--ink-2)" },
   { tag: [t.comment, t.docComment], color: "var(--ink-3)", fontStyle: "italic" },
-  { tag: [t.operator, t.punctuation, t.separator, t.bracket], color: "#8ea3c4" },
-  { tag: [t.meta, t.annotation], color: "var(--warning)" },
+  { tag: [t.operator, t.punctuation, t.separator, t.bracket], color: "var(--ink-3)" },
+  { tag: [t.meta, t.annotation], color: "var(--s4)" },
   { tag: t.variableName, color: "var(--ink-2)" },
   { tag: t.heading, color: "var(--ink)", fontWeight: "650" },
   { tag: t.strong, fontWeight: "650", color: "var(--ink)" },
@@ -163,7 +163,12 @@ export default function CodeEditor({
   language,
   minRows = 3,
   onRun,
+  onShiftRun,
+  onEscape,
+  onFocus,
+  onBlur,
   autoFocus,
+  lineNumbers: showLineNumbers = true,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -171,13 +176,19 @@ export default function CodeEditor({
   minRows?: number;
   /** Invoked on Mod-Enter (run the cell / query). */
   onRun?: () => void;
+  /** Invoked on Shift-Enter (run and advance). */
+  onShiftRun?: () => void;
+  onEscape?: () => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
   autoFocus?: boolean;
+  lineNumbers?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // Keep callbacks fresh without rebuilding the editor.
-  const callbacks = useRef({ onChange, onRun });
-  callbacks.current = { onChange, onRun };
+  const callbacks = useRef({ onChange, onRun, onShiftRun, onEscape, onFocus, onBlur });
+  callbacks.current = { onChange, onRun, onShiftRun, onEscape, onFocus, onBlur };
 
   useEffect(() => {
     if (!host.current) return;
@@ -193,9 +204,26 @@ export default function CodeEditor({
                 return true;
               },
             },
+            {
+              key: "Shift-Enter",
+              run: () => {
+                if (!callbacks.current.onShiftRun) return false;
+                callbacks.current.onShiftRun();
+                return true;
+              },
+            },
+            {
+              key: "Escape",
+              run: (v) => {
+                if (!callbacks.current.onEscape) return false;
+                v.contentDOM.blur();
+                callbacks.current.onEscape();
+                return true;
+              },
+            },
           ]),
         ),
-        lineNumbers(),
+        showLineNumbers ? lineNumbers() : [],
         highlightActiveLineGutter(),
         foldGutter(),
         history(),
@@ -226,6 +254,10 @@ export default function CodeEditor({
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             callbacks.current.onChange(update.state.doc.toString());
+          }
+          if (update.focusChanged) {
+            if (update.view.hasFocus) callbacks.current.onFocus?.();
+            else callbacks.current.onBlur?.();
           }
         }),
         EditorView.theme({

@@ -18,6 +18,7 @@ loom-core = { path = "../loom-core" }
 loom-executor = { path = "../loom-executor" }
 loom-store = { path = "../loom-store" }
 futures = { workspace = true }
+parking_lot = { workspace = true }
 polars = { version = "0.51", features = ["lazy", "json", "sql"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { workspace = true }
@@ -26,6 +27,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"] }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

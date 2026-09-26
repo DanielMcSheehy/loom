@@ -111,6 +111,10 @@ export interface NotebookCell {
   /** Persisted last output so notebooks re-open with their results. */
   output?: CellOutput | null;
   chart?: ChartConfig | null;
+  /** Which output tab is shown (table / chart / json). */
+  view?: ResultViewKind;
+  /** Editor hidden, output shown (Observable "unpinned" cell). */
+  collapsed?: boolean;
 }
 
 export interface CellOutput {
@@ -119,14 +123,21 @@ export interface CellOutput {
   rows?: Array<Record<string, unknown>>;
   logs?: string[];
   error?: string;
+  trace?: string;
   elapsed_ms?: number;
+  /** When the cell ran (ISO). */
+  ran_at?: string;
+  /** Hash of the code + inputs the output was produced from, for staleness. */
+  fingerprint?: string;
+  truncated?: boolean;
+  row_count?: number;
 }
 
-export interface ChartConfig {
-  kind: "bar" | "line";
-  x: string;
-  y: string;
-}
+import type { ChartSpec } from "./components/charts/data";
+
+export type ChartConfig = ChartSpec;
+
+export type ResultViewKind = "table" | "chart" | "json";
 
 export interface Notebook {
   id: string;
@@ -134,6 +145,22 @@ export interface Notebook {
   cells: NotebookCell[] | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface DatasetColumn {
+  name: string;
+  dtype: string;
+  null_count: number;
+  min?: unknown;
+  max?: unknown;
+  mean?: number | null;
+  distinct?: number | null;
+}
+
+export interface DatasetProfile extends Dataset {
+  columns: DatasetColumn[];
+  sample: Array<Record<string, unknown>>;
+  sample_size: number;
 }
 
 export type LoomEvent =

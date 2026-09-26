@@ -6,7 +6,7 @@ export interface LogLine {
   line: string;
 }
 
-export default function LogStream({ lines }: { lines: LogLine[] }) {
+export default function LogStream({ lines, done }: { lines: LogLine[]; done?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
@@ -24,9 +24,9 @@ export default function LogStream({ lines }: { lines: LogLine[] }) {
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {lines.length === 0 && <span className="muted">waiting for output…</span>}
+      {lines.length === 0 && <span className="muted">{done ? "No log output." : "waiting for output…"}</span>}
       {lines.map((l, i) => (
-        <div className="line" key={i}>
+        <div className={`line${l.line.startsWith("[trace]") ? " trace" : ""}`} key={i}>
           <span className="ts">{new Date(l.ts).toLocaleTimeString()}</span>
           <span className="tag">{l.tag}</span>
           <span>{l.line}</span>

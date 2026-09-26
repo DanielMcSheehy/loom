@@ -46,9 +46,7 @@ pub fn spawn(state: SharedState) {
                     Some(&when) if now >= when => {
                         due.insert(wf.id, now + interval);
                         info!(workflow = %wf.spec.name, "schedule fired");
-                        if let Err(e) =
-                            launch_run(state.clone(), wf, Value::Null, "schedule")
-                        {
+                        if let Err(e) = launch_run(state.clone(), wf, Value::Null, "schedule") {
                             error!("scheduler: failed to launch run: {e}");
                         }
                     }

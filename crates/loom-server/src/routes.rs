@@ -11,12 +11,12 @@ use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::Utc;
+use futures::StreamExt;
 use loom_core::{
-    validate_dag, Connector, ConnectorKind, LoomEvent, Function, FunctionSpec, Notebook, Run,
+    validate_dag, Connector, ConnectorKind, Function, FunctionSpec, LoomEvent, Notebook, Run,
     Runtime, Workflow, WorkflowSpec,
 };
 use loom_executor::{ExecError, ExecRequest};
-use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
@@ -24,7 +24,7 @@ use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
-use crate::orchestrator::{launch_run, merge_params};
+use crate::orchestrator::{cancel_run, launch_run, merge_params, CancelOutcome};
 use crate::state::SharedState;
 
 pub fn api_router() -> Router<SharedState> {
@@ -35,11 +35,14 @@ pub fn api_router() -> Router<SharedState> {
         .route("/workflows", get(list_workflows).post(create_workflow))
         .route(
             "/workflows/{id}",
-            get(get_workflow).put(update_workflow).delete(delete_workflow),
+            get(get_workflow)
+                .put(update_workflow)
+                .delete(delete_workflow),
         )
         .route("/workflows/{id}/trigger", post(trigger_workflow))
         .route("/runs", get(list_runs))
         .route("/runs/{id}", get(get_run))
+        .route("/runs/{id}/cancel", post(cancel_run_handler))
         .route("/runs/{id}/events", get(run_events))
         .route("/functions", get(list_functions).post(create_function))
         .route(
@@ -52,6 +55,10 @@ pub fn api_router() -> Router<SharedState> {
             post(invoke_function_stream),
         )
         .route("/datasets", get(list_datasets))
+        .route(
+            "/datasets/{name}",
+            get(describe_dataset).delete(delete_dataset),
+        )
         .route("/ingest/{dataset}", post(ingest))
         .route("/query", post(query))
         .route("/execute", post(execute))
@@ -60,7 +67,9 @@ pub fn api_router() -> Router<SharedState> {
         .route("/notebooks", get(list_notebooks).post(create_notebook))
         .route(
             "/notebooks/{id}",
-            get(get_notebook).put(update_notebook).delete(delete_notebook),
+            get(get_notebook)
+                .put(update_notebook)
+                .delete(delete_notebook),
         )
 }
 
@@ -156,13 +165,12 @@ async fn list_runs(
     State(state): State<SharedState>,
     Query(q): Query<RunsQuery>,
 ) -> ApiResult<Json<Vec<Run>>> {
-    Ok(Json(state.store.list_runs(q.workflow_id, q.limit.min(500))?))
+    Ok(Json(
+        state.store.list_runs(q.workflow_id, q.limit.min(500))?,
+    ))
 }
 
-async fn get_run(
-    State(state): State<SharedState>,
-    Path(id): Path<Uuid>,
-) -> ApiResult<Json<Value>> {
+async fn get_run(State(state): State<SharedState>, Path(id): Path<Uuid>) -> ApiResult<Json<Value>> {
     let run = state.store.get_run(id)?;
     let mut tasks = state.store.list_task_runs(id)?;
     tasks.sort_by(|a, b| {
@@ -171,6 +179,21 @@ async fn get_run(
             .cmp(&b.started_at.unwrap_or(chrono::DateTime::<Utc>::MAX_UTC))
     });
     Ok(Json(json!({ "run": run, "tasks": tasks })))
+}
+
+/// Cancel a pending/running run. 202 with the run (already `cancelled`);
+/// 409 if it had reached a terminal state; 404 if unknown.
+async fn cancel_run_handler(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<(StatusCode, Json<Run>)> {
+    match cancel_run(&state, id)? {
+        CancelOutcome::Cancelled(run) => Ok((StatusCode::ACCEPTED, Json(run))),
+        CancelOutcome::AlreadyTerminal(run) => Err(ApiError::conflict(format!(
+            "run is already {}",
+            run.state.as_str()
+        ))),
+    }
 }
 
 // ── live event streams (SSE) ─────────────────────────────────────────────
@@ -202,10 +225,7 @@ async fn all_events(State(state): State<SharedState>) -> impl IntoResponse {
     sse_stream(state, None)
 }
 
-async fn run_events(
-    State(state): State<SharedState>,
-    Path(id): Path<Uuid>,
-) -> impl IntoResponse {
+async fn run_events(State(state): State<SharedState>, Path(id): Path<Uuid>) -> impl IntoResponse {
     sse_stream(state, Some(id))
 }
 
@@ -359,9 +379,9 @@ async fn invoke_function_stream(
             duration_ms,
         });
         let final_event = match exec {
-            Ok(outcome) => Event::default().event("result").data(
-                json!({ "result": outcome.value, "duration_ms": duration_ms }).to_string(),
-            ),
+            Ok(outcome) => Event::default()
+                .event("result")
+                .data(json!({ "result": outcome.value, "duration_ms": duration_ms }).to_string()),
             Err(err) => Event::default()
                 .event("error")
                 .data(json!({ "error": err.to_string(), "duration_ms": duration_ms }).to_string()),
@@ -376,7 +396,68 @@ async fn invoke_function_stream(
 // ── datasets & streaming ingestion ───────────────────────────────────────
 
 async fn list_datasets(State(state): State<SharedState>) -> ApiResult<Json<Value>> {
-    Ok(Json(serde_json::to_value(state.store.list_datasets()?).unwrap()))
+    Ok(Json(
+        serde_json::to_value(state.store.list_datasets()?).unwrap(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct DescribeQuery {
+    #[serde(default = "default_sample")]
+    sample: usize,
+}
+
+fn default_sample() -> usize {
+    20
+}
+
+/// Dataset metadata plus a Polars-computed column profile and a row sample.
+async fn describe_dataset(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+    Query(q): Query<DescribeQuery>,
+) -> ApiResult<Json<Value>> {
+    let ds = state.store.get_dataset(&name)?;
+    let path = state.dataset_path(&name);
+    let sample = q.sample.clamp(1, 200);
+    let profile = if path.is_file() {
+        tokio::task::spawn_blocking(move || crate::data::describe_dataset(&path, sample))
+            .await
+            .map_err(|e| ApiError::internal(format!("describe task failed: {e}")))?
+            .map_err(ApiError::internal)?
+    } else {
+        // Registered but nothing on disk (e.g. file removed out of band).
+        crate::data::DatasetProfile {
+            columns: Vec::new(),
+            sample: Vec::new(),
+            sample_size: 0,
+        }
+    };
+    Ok(Json(json!({
+        "name": ds.name,
+        "records": ds.records,
+        "bytes": ds.bytes,
+        "created_at": ds.created_at,
+        "updated_at": ds.updated_at,
+        "columns": profile.columns,
+        "sample": profile.sample,
+        "sample_size": profile.sample_size,
+    })))
+}
+
+/// Remove a dataset's NDJSON file and its registry row.
+async fn delete_dataset(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    state.store.get_dataset(&name)?;
+    match tokio::fs::remove_file(state.dataset_path(&name)).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    state.store.delete_dataset(&name)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -526,8 +607,10 @@ async fn create_connector(
             "connector name must match [a-zA-Z0-9_-]{1,64}",
         ));
     }
-    if matches!(body.kind, ConnectorKind::Postgres | ConnectorKind::Clickhouse)
-        && body.url.is_empty()
+    if matches!(
+        body.kind,
+        ConnectorKind::Postgres | ConnectorKind::Clickhouse
+    ) && body.url.is_empty()
     {
         return Err(ApiError::bad_request("this connector kind requires a url"));
     }

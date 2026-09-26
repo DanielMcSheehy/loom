@@ -41,6 +41,9 @@ for event in client.stream_run(run["id"]):
     print(event["type"], event.get("line", ""))
 ```
 
+Stop a run that is still pending/running: `client.cancel_run(run["id"])`
+(returns the cancelled run; raises `LoomError` 409 if it already finished).
+
 ## Serverless functions
 
 ```python
@@ -52,6 +55,9 @@ print(client.invoke("hello", {"name": "loom"}))   # {"ok": true, "result": "hi l
 
 ```python
 client.ingest("sensor-readings", ({"sensor": i, "v": i * 0.5} for i in range(10_000)))
+profile = client.describe_dataset("sensor-readings", sample=5)   # columns + row sample
+print(profile["columns"][1])  # {"name": "v", "dtype": "float", "min": 0.0, "max": ..., "mean": ..., ...}
+client.delete_dataset("sensor-readings")                         # file + registry row
 ```
 
 Flows created with `Flow(..., on_ingest="sensor-readings")` run automatically

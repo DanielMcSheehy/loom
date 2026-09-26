@@ -71,46 +71,66 @@ fn pg_value(row: &tokio_postgres::Row, i: usize) -> Value {
     let ty = row.columns()[i].type_();
     let get = |v: Option<Value>| v.unwrap_or(Value::Null);
     match *ty {
-        Type::BOOL => get(row.try_get::<_, Option<bool>>(i).ok().flatten().map(Value::from)),
-        Type::INT2 => get(row.try_get::<_, Option<i16>>(i).ok().flatten().map(Value::from)),
-        Type::INT4 => get(row.try_get::<_, Option<i32>>(i).ok().flatten().map(Value::from)),
-        Type::INT8 => get(row.try_get::<_, Option<i64>>(i).ok().flatten().map(Value::from)),
-        Type::FLOAT4 => get(row.try_get::<_, Option<f32>>(i).ok().flatten().map(Value::from)),
-        Type::FLOAT8 => get(row.try_get::<_, Option<f64>>(i).ok().flatten().map(Value::from)),
-        Type::JSON | Type::JSONB => get(
-            row.try_get::<_, Option<serde_json::Value>>(i).ok().flatten(),
-        ),
-        Type::TIMESTAMP => get(
-            row.try_get::<_, Option<chrono::NaiveDateTime>>(i)
-                .ok()
-                .flatten()
-                .map(|t| Value::from(t.to_string())),
-        ),
-        Type::TIMESTAMPTZ => get(
-            row.try_get::<_, Option<chrono::DateTime<chrono::Utc>>>(i)
-                .ok()
-                .flatten()
-                .map(|t| Value::from(t.to_rfc3339())),
-        ),
-        Type::DATE => get(
-            row.try_get::<_, Option<chrono::NaiveDate>>(i)
-                .ok()
-                .flatten()
-                .map(|d| Value::from(d.to_string())),
-        ),
-        Type::UUID => get(
-            row.try_get::<_, Option<uuid::Uuid>>(i)
-                .ok()
-                .flatten()
-                .map(|u| Value::from(u.to_string())),
-        ),
+        Type::BOOL => get(row
+            .try_get::<_, Option<bool>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::INT2 => get(row
+            .try_get::<_, Option<i16>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::INT4 => get(row
+            .try_get::<_, Option<i32>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::INT8 => get(row
+            .try_get::<_, Option<i64>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::FLOAT4 => get(row
+            .try_get::<_, Option<f32>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::FLOAT8 => get(row
+            .try_get::<_, Option<f64>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
+        Type::JSON | Type::JSONB => get(row
+            .try_get::<_, Option<serde_json::Value>>(i)
+            .ok()
+            .flatten()),
+        Type::TIMESTAMP => get(row
+            .try_get::<_, Option<chrono::NaiveDateTime>>(i)
+            .ok()
+            .flatten()
+            .map(|t| Value::from(t.to_string()))),
+        Type::TIMESTAMPTZ => get(row
+            .try_get::<_, Option<chrono::DateTime<chrono::Utc>>>(i)
+            .ok()
+            .flatten()
+            .map(|t| Value::from(t.to_rfc3339()))),
+        Type::DATE => get(row
+            .try_get::<_, Option<chrono::NaiveDate>>(i)
+            .ok()
+            .flatten()
+            .map(|d| Value::from(d.to_string()))),
+        Type::UUID => get(row
+            .try_get::<_, Option<uuid::Uuid>>(i)
+            .ok()
+            .flatten()
+            .map(|u| Value::from(u.to_string()))),
         // TEXT, VARCHAR, NAME, NUMERIC-as-text fallback, everything else.
-        _ => get(
-            row.try_get::<_, Option<String>>(i)
-                .ok()
-                .flatten()
-                .map(Value::from),
-        ),
+        _ => get(row
+            .try_get::<_, Option<String>>(i)
+            .ok()
+            .flatten()
+            .map(Value::from)),
     }
 }
 
