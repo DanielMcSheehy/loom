@@ -67,13 +67,18 @@ Every screenshot below is the real UI, served by the binary itself.
 
 | Orchestrate | Observe |
 | --- | --- |
-| ![Workflow DAG with duration trend](docs/screenshots/workflow-dag.png) | ![Run detail — task graph + Gantt timeline](docs/screenshots/run-detail.png) |
+| ![lab-shazam workflow — Python + TypeScript DAG with duration trend](docs/screenshots/workflow-dag.png) | ![lab-shazam run — naive DFT vs FFT, spectrogram, fingerprint match on a Gantt timeline](docs/screenshots/run-detail.png) |
 
 | Query | Invoke |
 | --- | --- |
 | ![SQL over ingested datasets](docs/screenshots/data-query.png) | ![Serverless function playground](docs/screenshots/functions.png) |
 
-![Executable notebook — markdown, SQL, and charts](docs/screenshots/notebook.png)
+![Notebook lab — training a neural net from scratch on two spirals: SQL, charts, and the math in markdown](docs/screenshots/notebook.png)
+
+The workflow, run, and notebook above are real "labs" built on Loom: a Shazam-style audio
+fingerprinter (Fourier transforms), PageRank on a synthetic web, and backpropagation from
+scratch — each a Python + TypeScript DAG whose results are ingested, queried with SQL, and
+charted in a teaching notebook.
 
 ## Architecture
 
