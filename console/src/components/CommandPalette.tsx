@@ -3,6 +3,7 @@
 import {
   ArrowRight,
   BookOpen,
+  Books,
   Database,
   Function as FunctionIcon,
   GitBranch,
@@ -16,6 +17,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import { DOC_PAGES } from "../pages/docs/meta";
 import type { Dataset, LoomFunction, Notebook, Workflow } from "../types";
 
 interface Item {
@@ -76,6 +78,7 @@ export default function CommandPalette({
       { id: "n-nb", group: "Navigate", title: "Notebooks", icon: <BookOpen size={16} />, run: go("/notebooks") },
       { id: "n-fn", group: "Navigate", title: "Functions", icon: <FunctionIcon size={16} />, run: go("/functions") },
       { id: "n-data", group: "Navigate", title: "Data", icon: <Database size={16} />, run: go("/data") },
+      { id: "n-docs", group: "Navigate", title: "Docs", icon: <Books size={16} />, keywords: "documentation help reference", run: go("/docs") },
     ];
     const actions: Item[] = [
       {
@@ -137,7 +140,16 @@ export default function CommandPalette({
       icon: <Database size={16} />,
       run: go(`/data?dataset=${encodeURIComponent(d.name)}`),
     }));
-    return [...nav, ...actions, ...wf, ...nb, ...fn, ...ds];
+    const docs = DOC_PAGES.map<Item>((p) => ({
+      id: `doc-${p.slug}`,
+      group: "Docs",
+      title: p.title,
+      desc: p.summary,
+      icon: <Books size={16} />,
+      keywords: `docs documentation ${p.section} ${p.keywords ?? ""}`,
+      run: go(`/docs/${p.slug}`),
+    }));
+    return [...nav, ...actions, ...wf, ...nb, ...fn, ...ds, ...docs];
   }, [data, navigate, onClose, theme, onToggleTheme]);
 
   const filtered = useMemo(() => {

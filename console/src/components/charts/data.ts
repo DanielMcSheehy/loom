@@ -124,8 +124,11 @@ export function inferColumns(rows: Row[], sampleLimit = 5000): ColumnInfo[] {
 
 // ── chart spec & series preparation ──────────────────────────────────
 
-export type Mark = "bar" | "hbar" | "line" | "area" | "scatter" | "pie" | "histogram";
+export type Mark = "bar" | "hbar" | "line" | "area" | "scatter" | "pie" | "histogram" | "radar";
 export type Agg = "none" | "sum" | "avg" | "count" | "min" | "max" | "median";
+/** Statistic lines drawn for line/area marks when x has duplicate values. */
+export type Stat = "avg" | "min" | "max" | "median";
+export const STATS: Stat[] = ["avg", "min", "max", "median"];
 
 export interface ChartSpec {
   mark: Mark;
@@ -141,12 +144,34 @@ export interface ChartSpec {
   bins?: number;
   labels?: boolean;
   title?: string;
+  /**
+   * Line/area only: draw one line per statistic of the same y (per x
+   * bucket) instead of a single aggregated line. Empty/undefined keeps the
+   * classic single line (`agg`).
+   */
+  stats?: Stat[];
+  /** With `stats`: also shade the min–max envelope of each measure. */
+  band?: boolean;
+  /**
+   * Radar only. "x" (default): each distinct x value is an axis and each y
+   * measure (or colour group) a polygon. "measures": each y column is an
+   * axis and each x value a polygon (x is the series label).
+   */
+  radarAxes?: "x" | "measures";
+  /**
+   * Per-series colour overrides keyed by series / slice name. Values are
+   * any CSS colour: a palette token (`var(--s3)`) stays theme-aware, a hex
+   * is used verbatim.
+   */
+  colors?: Record<string, string>;
 }
 
 export interface Series {
   name: string;
   /** index into the categorical palette (0..7) */
   slot: number;
+  /** "band": a shaded envelope from y0 (min) to y (max), no line. */
+  kind?: "line" | "band";
   points: Array<{ x: number | string; y: number; y0?: number; raw?: Row; label?: string }>;
 }
 
@@ -185,10 +210,26 @@ function aggregate(values: number[], agg: Agg): number {
 }
 
 export function prepare(rows: Row[], spec: ChartSpec, columns?: ColumnInfo[]): Prepared {
+  // Radar with measures as axes: pivot to long form (axis = measure name,
+  // series = x value) and render as the plain x-as-axes case.
+  if (spec.mark === "radar" && spec.radarAxes === "measures" && spec.y.length > 1 && !spec.color) {
+    const long: Row[] = [];
+    for (const r of rows) {
+      const label = r[spec.x];
+      if (label === null || label === undefined) continue;
+      for (const m of spec.y) {
+        const v = toNumber(r[m]);
+        if (v === null) continue;
+        long.push({ __axis: m, __series: String(label), __value: v });
+      }
+    }
+    return prepare(long, { ...spec, radarAxes: "x", x: "__axis", y: ["__value"], color: "__series", sort: "none", limit: undefined });
+  }
   const cols = columns ?? inferColumns(rows);
   const xInfo = cols.find((c) => c.name === spec.x);
-  const isBandMark = spec.mark === "bar" || spec.mark === "hbar" || spec.mark === "pie";
+  const isBandMark = spec.mark === "bar" || spec.mark === "hbar" || spec.mark === "pie" || spec.mark === "radar";
   const agg: Agg = spec.agg ?? "none";
+  const stats = (spec.mark === "line" || spec.mark === "area") && spec.stats?.length ? spec.stats : null;
 
   // Histogram: bin the x column.
   if (spec.mark === "histogram") {
@@ -301,6 +342,44 @@ export function prepare(rows: Row[], spec: ChartSpec, columns?: ColumnInfo[]): P
     if (spec.limit && categories.length > spec.limit) categories = categories.slice(0, spec.limit);
   }
   const catSet = new Set(categories);
+
+  if (stats) {
+    // Statistic lines: one series per (measure × stat), plus an optional
+    // min–max band per measure. Names stay short for a single measure.
+    const series: Series[] = [];
+    const label = (name: string, stat: string) => (names.length > 1 ? `${name} · ${stat}` : stat);
+    for (const name of names) {
+      const m = buckets.get(name)!;
+      const entries = [...m.entries()].filter(([x]) => xType !== "band" || catSet.has(String(x)));
+      const sortPts = <P extends { x: number | string }>(pts: P[]) =>
+        xType !== "band"
+          ? pts.sort((a, b) => (a.x as number) - (b.x as number))
+          : pts.sort((a, b) => categories.indexOf(a.x as string) - categories.indexOf(b.x as string));
+      if (spec.band) {
+        series.push({
+          name: label(name, "range"),
+          slot: series.length % MAX_SERIES,
+          kind: "band",
+          points: sortPts(
+            entries.map(([x, b]) => ({
+              x: xType === "band" ? String(x) : (x as number),
+              y0: aggregate(b.vals, "min"),
+              y: aggregate(b.vals, "max"),
+              raw: b.raw,
+            })),
+          ),
+        });
+      }
+      for (const stat of stats) {
+        series.push({
+          name: label(name, stat),
+          slot: series.length % MAX_SERIES,
+          points: sortPts(entries.map(([x, b]) => ({ x: xType === "band" ? String(x) : (x as number), y: aggregate(b.vals, stat), raw: b.raw }))),
+        });
+      }
+    }
+    return { series, xType, categories, totals: catTotals, stacked: false };
+  }
 
   const series: Series[] = names.map((name, i) => {
     const m = buckets.get(name)!;

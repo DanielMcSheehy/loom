@@ -123,29 +123,69 @@ export function Skeleton({ h = 14, w = "100%", style }: { h?: number; w?: number
 }
 
 // ── toasts ────────────────────────────────────────────────────────────
-interface Toast {
+export interface ToastOptions {
+  kind?: "info" | "error";
+  /** Optional action button (e.g. Undo). Clicking it runs `onClick` and dismisses the toast. */
+  action?: { label: string; onClick: () => void };
+  /** Auto-dismiss after this many ms. Defaults: 3200 (info), 6000 (error), 8000 when an action is present. */
+  duration?: number;
+}
+interface Toast extends Required<Pick<ToastOptions, "kind">> {
   id: number;
   text: string;
-  kind: "info" | "error";
+  action?: ToastOptions["action"];
 }
-const ToastCtx = createContext<(text: string, kind?: Toast["kind"]) => void>(() => {});
+export interface ToastApi {
+  /** Show a toast. The second argument is a kind (legacy) or a full options object. Returns the toast id. */
+  (text: string, kindOrOpts?: Toast["kind"] | ToastOptions): number;
+  /** Dismiss a toast early (e.g. when its Undo is no longer applicable). */
+  dismiss: (id: number) => void;
+}
+const noopToast: ToastApi = Object.assign(() => 0, { dismiss: () => {} });
+const ToastCtx = createContext<ToastApi>(noopToast);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seq = useRef(0);
-  const push = useCallback((text: string, kind: Toast["kind"] = "info") => {
-    const id = ++seq.current;
-    setToasts((t) => [...t, { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === "error" ? 6000 : 3200);
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  const dismiss = useCallback((id: number) => {
+    clearTimeout(timers.current.get(id));
+    timers.current.delete(id);
+    setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
+  const push = useCallback(
+    (text: string, kindOrOpts: Toast["kind"] | ToastOptions = "info") => {
+      const opts: ToastOptions = typeof kindOrOpts === "string" ? { kind: kindOrOpts } : kindOrOpts;
+      const kind = opts.kind ?? "info";
+      const id = ++seq.current;
+      setToasts((t) => [...t, { id, text, kind, action: opts.action }]);
+      const ms = opts.duration ?? (opts.action ? 8000 : kind === "error" ? 6000 : 3200);
+      timers.current.set(id, setTimeout(() => dismiss(id), ms));
+      return id;
+    },
+    [dismiss],
+  );
+  const api = useMemo<ToastApi>(() => Object.assign(push, { dismiss }), [push, dismiss]);
   return (
-    <ToastCtx.Provider value={push}>
+    <ToastCtx.Provider value={api}>
       {children}
       <div className="toasts">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind}`}>
+          <div key={t.id} className={`toast ${t.kind}${t.action ? " has-action" : ""}`} role="status">
             {t.kind === "error" ? <Warning size={16} weight="fill" /> : <CheckCircle size={16} weight="fill" />}
-            {t.text}
+            <span className="toast-text">{t.text}</span>
+            {t.action && (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => {
+                  dismiss(t.id);
+                  t.action?.onClick();
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>

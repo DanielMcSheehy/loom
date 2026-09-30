@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Books,
   CaretRight,
   Database,
   Function as FunctionIcon,
@@ -11,7 +12,7 @@ import {
   SquaresFour,
   Sun,
 } from "@phosphor-icons/react";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { Suspense, createContext, lazy, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useEvents } from "./api";
 import CommandPalette from "./components/CommandPalette";
@@ -26,6 +27,9 @@ import Runs from "./pages/Runs";
 import WorkflowDetail from "./pages/WorkflowDetail";
 import Workflows from "./pages/Workflows";
 import { useTheme } from "./theme";
+
+// Docs content is sizeable and rarely visited; keep it out of the main chunk.
+const Docs = lazy(() => import("./pages/docs/Docs"));
 
 // Pages publish their breadcrumb trail into the top bar.
 export type Crumb = { label: string; to?: string };
@@ -46,6 +50,7 @@ const NAV: Array<{ to: string; label: string; icon: ReactNode; end?: boolean; ke
   { to: "/notebooks", label: "Notebooks", icon: <BookOpen size={18} />, key: "4" },
   { to: "/functions", label: "Functions", icon: <FunctionIcon size={18} />, key: "5" },
   { to: "/data", label: "Data", icon: <Database size={18} />, key: "6" },
+  { to: "/docs", label: "Docs", icon: <Books size={18} />, key: "7" },
 ];
 
 export default function App() {
@@ -153,6 +158,8 @@ export default function App() {
               <Route path="/functions" element={<Functions />} />
               <Route path="/data" element={<Data />} />
               <Route path="/ingestion" element={<Navigate to="/data" replace />} />
+              <Route path="/docs" element={<Suspense fallback={null}><Docs /></Suspense>} />
+              <Route path="/docs/:page" element={<Suspense fallback={null}><Docs /></Suspense>} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

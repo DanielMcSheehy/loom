@@ -413,6 +413,14 @@ input[type="file"] { font-size: 12.5px; color: var(--ink-2); }
 .toasts { position: fixed; right: 20px; bottom: 20px; z-index: 70; display: flex; flex-direction: column; gap: 8px; }
 .toast { background: var(--ink); color: var(--bg); padding: 10px 14px; border-radius: var(--r); font-size: 13px; box-shadow: var(--shadow-lg); display: flex; gap: 10px; align-items: center; animation: rise 0.2s var(--ease); max-width: 380px; }
 .toast.error { background: var(--critical); color: #fff; }
+.toast .toast-text { flex: 1; min-width: 0; }
+.toast .toast-action {
+  flex-shrink: 0; margin-left: 4px; height: 24px; padding: 0 9px; border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent); background: color-mix(in srgb, currentColor 10%, transparent);
+  color: inherit; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.toast .toast-action:hover { background: color-mix(in srgb, currentColor 20%, transparent); }
+.toast.error .toast-action { border-color: rgba(255, 255, 255, 0.45); background: rgba(255, 255, 255, 0.14); }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 
 /* ── logs ───────────────────────────────────────────────────────────── */
@@ -588,7 +596,14 @@ details.task-detail[open] summary .task-row { background: var(--surface-2); }
 .nb-head .meta { font-size: 12px; color: var(--ink-3); display: flex; gap: 12px; align-items: center; }
 .nb-head .actions { margin-left: auto; }
 .save-state { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); }
+.save-state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex-shrink: 0; }
 .save-state.dirty { color: var(--warning); }
+.save-state.dirty::before { background: var(--warning); }
+.save-state.saving::before { background: var(--running); animation: pulse 1s ease-in-out infinite; }
+.save-state.error { color: var(--critical); }
+.save-state.error::before { background: var(--critical); }
+.nb-head .actions { display: flex; align-items: center; gap: 8px; }
+.nb-head .actions .sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
 
 .cells { display: flex; flex-direction: column; margin-top: 6px; }
 
@@ -662,20 +677,27 @@ details.task-detail[open] summary .task-row { background: var(--surface-2); }
 .cell-error summary { cursor: pointer; font-family: var(--sans); font-size: 12px; opacity: 0.8; }
 .cell-error pre { margin: 6px 0 0; white-space: pre-wrap; opacity: 0.85; font-size: 11.5px; }
 
-/* insertion point between cells (Observable-style) */
-.inserter { position: relative; height: 14px; margin-left: 48px; display: flex; align-items: center; z-index: 2; }
-.inserter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--accent); opacity: 0; transition: opacity 0.12s; }
+/* insertion point between cells (Observable-style). The row shares the cell's
+   two-column grid (gutter + main), so the "+" sits on the exact centre of the
+   cell column, not of the whole row. */
+.inserter { position: relative; height: 14px; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 8px; align-items: center; z-index: 2; }
+.inserter::before { content: ""; position: absolute; left: 48px; right: 0; top: 50%; height: 1px; background: var(--accent); opacity: 0; transition: opacity 0.12s; }
 .inserter:hover::before, .inserter.open::before { opacity: 0.6; }
+.inserter > .plus-col { grid-column: 2; position: relative; height: 100%; display: flex; align-items: center; justify-content: center; }
 .inserter button.plus {
-  position: absolute; left: 50%; transform: translateX(-50%); width: 22px; height: 22px; border-radius: 50%;
+  position: absolute; left: 50%; top: 50%; margin: -11px 0 0 -11px; width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 0;
   border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink-3); display: grid; place-items: center; cursor: pointer;
-  opacity: 0; transition: opacity 0.12s, transform 0.12s;
+  opacity: 0; transition: opacity 0.12s, background 0.12s;
 }
+.inserter button.plus svg { display: block; }
 .inserter:hover button.plus, .inserter.open button.plus, .inserter.last button.plus { opacity: 1; }
 .inserter button.plus:hover, .inserter.open button.plus { background: var(--accent); color: #fff; border-color: transparent; }
 .inserter.last { height: 40px; }
+/* The trailing label never takes part in layout, so it cannot shift the "+". */
+.inserter .add-label { position: absolute; left: calc(50% + 18px); top: 50%; transform: translateY(-50%); background: var(--bg); padding: 0 6px 0 4px; height: 26px; }
+.inserter.last:hover .add-label { color: var(--ink); }
 
-.picker { position: absolute; z-index: 45; left: 50%; top: 14px; transform: translateX(-50%); width: 560px; max-width: calc(100vw - 80px); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); overflow: hidden; animation: pop 0.14s var(--ease); }
+.picker { position: absolute; z-index: 45; left: 50%; top: 14px; translate: -50% 0; width: 560px; max-width: calc(100vw - 80px); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); overflow: hidden; animation: pop 0.14s var(--ease); }
 .picker .palette-input { padding: 10px 12px; }
 .picker .palette-input input { font-size: 14px; }
 .picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 8px; }
@@ -720,7 +742,10 @@ details.task-detail[open] summary .task-row { background: var(--surface-2); }
 
 /* ── code ───────────────────────────────────────────────────────────── */
 
-.cm-host { border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; background: var(--surface); transition: border-color 0.12s, box-shadow 0.12s; width: 100%; min-width: 0; display: block; }
+.cm-host { position: relative; border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; background: var(--surface); transition: border-color 0.12s, box-shadow 0.12s; width: 100%; min-width: 0; display: block; }
+.cm-types-btn { position: absolute; top: 6px; right: 8px; z-index: 3; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; font: inherit; font-size: 11px; font-family: var(--mono); color: var(--ink-3); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); cursor: pointer; opacity: 0; transition: opacity 0.12s, color 0.12s; }
+.cm-host:hover .cm-types-btn, .cm-host:focus-within .cm-types-btn { opacity: 1; }
+.cm-types-btn:hover { color: var(--accent); border-color: var(--accent); }
 .cm-host .cm-editor { min-width: 0; width: 100%; }
 .cm-host .cm-scroller { overflow: auto; }
 .cm-host:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }

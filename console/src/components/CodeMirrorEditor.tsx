@@ -45,8 +45,12 @@ import {
   rectangularSelection,
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
+import { BracketsCurly } from "@phosphor-icons/react";
 import { useEffect, useRef } from "react";
 import type { CodeLanguage } from "./CodeBlock";
+import type { TypeContext } from "./editor/context";
+import { insertTypes, loomTypeExtension, setTypeContext } from "./editor/extension";
+import type { ChainLang } from "./editor/resolve";
 
 // ── theme (matches the console palette) ──────────────────────────────────
 
@@ -155,6 +159,8 @@ function languageExtension(language: CodeLanguage): Extension {
   }
 }
 
+const HANDLER_LANGS = new Set<CodeLanguage>(["python", "typescript", "javascript"]);
+
 // ── editable editor ──────────────────────────────────────────────────────
 
 export default function CodeEditor({
@@ -169,6 +175,7 @@ export default function CodeEditor({
   onBlur,
   autoFocus,
   lineNumbers: showLineNumbers = true,
+  typeContext,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -183,8 +190,14 @@ export default function CodeEditor({
   onBlur?: () => void;
   autoFocus?: boolean;
   lineNumbers?: boolean;
+  /**
+   * What `handler(params, inputs)` will receive. Enables field completion,
+   * hover types, and the "Insert types" action; updates in place.
+   */
+  typeContext?: TypeContext;
 }) {
   const host = useRef<HTMLDivElement>(null);
+  const typed = HANDLER_LANGS.has(language);
   const view = useRef<EditorView | null>(null);
   // Keep callbacks fresh without rebuilding the editor.
   const callbacks = useRef({ onChange, onRun, onShiftRun, onEscape, onFocus, onBlur });
@@ -249,6 +262,7 @@ export default function CodeEditor({
           indentWithTab,
         ]),
         languageExtension(language),
+        typed ? loomTypeExtension(language as ChainLang) : [],
         loomTheme,
         syntaxHighlighting(loomHighlight),
         EditorView.updateListener.of((update) => {
@@ -267,6 +281,7 @@ export default function CodeEditor({
     });
     const v = new EditorView({ state, parent: host.current });
     view.current = v;
+    if (typed && typeContext) v.dispatch({ effects: setTypeContext.of(typeContext) });
     if (autoFocus) v.focus();
     return () => {
       v.destroy();
@@ -284,5 +299,32 @@ export default function CodeEditor({
     }
   }, [value]);
 
-  return <div className="cm-host" ref={host} />;
+  // Context changes (cells re-run, deps toggled) flow in as an effect; the
+  // editor keeps its doc, history, and cursor.
+  useEffect(() => {
+    const v = view.current;
+    if (v && typed) v.dispatch({ effects: setTypeContext.of(typeContext ?? null) });
+  }, [typeContext, typed]);
+
+  return (
+    <div className="cm-host" ref={host}>
+      {typed && typeContext && (
+        <button
+          type="button"
+          className="cm-types-btn"
+          title="Insert types: write Inputs / Params stubs inferred from the current data and annotate the handler"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const v = view.current;
+            if (v) {
+              insertTypes(v, language as ChainLang);
+              v.focus();
+            }
+          }}
+        >
+          <BracketsCurly size={12} weight="bold" /> types
+        </button>
+      )}
+    </div>
+  );
 }

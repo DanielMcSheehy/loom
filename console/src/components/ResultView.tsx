@@ -22,7 +22,19 @@ export function migrateChart(c: unknown): ChartConfig | null {
   if (typeof o.kind === "string" && typeof o.x === "string" && typeof o.y === "string") {
     return { mark: o.kind === "line" ? "line" : "bar", x: o.x, y: [o.y] };
   }
-  if (typeof o.mark === "string" && typeof o.x === "string" && Array.isArray(o.y)) return o as unknown as ChartConfig;
+  if (typeof o.mark === "string" && typeof o.x === "string" && Array.isArray(o.y)) {
+    // Newer optional fields (stats / band / colors / radarAxes) are ignored
+    // by older renderers and validated here so a malformed value can't
+    // break the chart. Keep the original reference when nothing is wrong so
+    // memoised series preparation is not redone every render.
+    const badStats = o.stats !== undefined && !(Array.isArray(o.stats) && o.stats.every((s) => typeof s === "string"));
+    const badColors = o.colors !== undefined && (typeof o.colors !== "object" || o.colors === null || Array.isArray(o.colors));
+    if (!badStats && !badColors) return o as unknown as ChartConfig;
+    const spec = { ...o } as Record<string, unknown>;
+    if (badStats) delete spec.stats;
+    if (badColors) delete spec.colors;
+    return spec as unknown as ChartConfig;
+  }
   return null;
 }
 

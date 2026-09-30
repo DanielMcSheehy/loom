@@ -2,6 +2,7 @@
 // main bundle stays lean — it loads on first render of an editable field.
 import { lazy, Suspense } from "react";
 import type { CodeLanguage } from "./CodeBlock";
+import type { TypeContext } from "./editor/context";
 
 export { CodeBlock, highlight } from "./CodeBlock";
 export type { CodeLanguage } from "./CodeBlock";
@@ -22,6 +23,8 @@ export interface CodeEditorProps {
   onBlur?: () => void;
   autoFocus?: boolean;
   lineNumbers?: boolean;
+  /** Data the handler will receive; enables `params` / `inputs` completion, hover types, and "Insert types". */
+  typeContext?: TypeContext;
 }
 
 export default function CodeEditor(props: CodeEditorProps) {

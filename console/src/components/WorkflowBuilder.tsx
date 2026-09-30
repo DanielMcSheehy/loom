@@ -2,10 +2,12 @@
 // with a real code editor, dependency chips, and a live DAG preview. A JSON
 // tab exposes the raw spec (params merging, retries, timeouts) for power
 // users — the two views edit the same spec and stay in sync on tab switch.
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../api";
 import CodeEditor from "./CodeEditor";
 import DagGraph from "./DagGraph";
-import type { RuntimeName, TaskSpec, WorkflowSpec } from "../types";
+import { ContextCache, mergeParams, type TypeContext } from "./editor/context";
+import type { Run, RuntimeName, TaskRun, TaskSpec, WorkflowSpec } from "../types";
 
 const TASK_TEMPLATE: Record<RuntimeName, string> = {
   python:
@@ -83,12 +85,21 @@ function validate(spec: WorkflowSpec): string | null {
   return null;
 }
 
+/** Task results from the most recent run that produced any, keyed by task id. */
+interface LastRun {
+  id: string;
+  results: Record<string, unknown>;
+}
+
 export default function WorkflowBuilder({
   initial,
+  workflowId,
   submitLabel,
   onSubmit,
 }: {
   initial?: WorkflowSpec;
+  /** When editing an existing workflow: lets task editors see upstream results from its latest run. */
+  workflowId?: string;
   submitLabel: string;
   onSubmit: (spec: WorkflowSpec) => Promise<void>;
 }) {
@@ -100,6 +111,63 @@ export default function WorkflowBuilder({
   const [jsonDraft, setJsonDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lastRun, setLastRun] = useState<LastRun | null>(null);
+  const contextCache = useRef(new ContextCache());
+
+  // Upstream results for editor completion: newest completed run first,
+  // else the newest run with any finished task.
+  useEffect(() => {
+    if (!workflowId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const runs = await api.get<Run[]>(`/api/runs?workflow_id=${workflowId}&limit=20`);
+        const ordered = [...runs.filter((r) => r.state === "completed"), ...runs.filter((r) => r.state !== "completed")];
+        for (const run of ordered.slice(0, 5)) {
+          const detail = await api.get<{ run: Run; tasks: TaskRun[] }>(`/api/runs/${run.id}`);
+          const results: Record<string, unknown> = {};
+          for (const t of detail.tasks) if (t.state === "completed" && t.result !== undefined) results[t.task_id] = t.result;
+          if (Object.keys(results).length > 0) {
+            if (!cancelled) setLastRun({ id: run.id, results });
+            return;
+          }
+        }
+      } catch {
+        /* no run history — names still complete, typed unknown */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workflowId]);
+
+  // One context per task: `inputs` = depends_on ids (values from the last
+  // run when present), `params` = run params merged with the task's.
+  const taskContexts = useMemo(() => {
+    let runParams: unknown = spec.params;
+    try {
+      runParams = paramsDraft.trim() ? (JSON.parse(paramsDraft) as unknown) : {};
+    } catch {
+      /* mid-edit JSON: keep the last good params */
+    }
+    const runLabel = lastRun ? `run ${lastRun.id.slice(0, 8)}` : null;
+    const out = spec.tasks.map((task, idx): TypeContext => {
+      const key = [task.id, task.depends_on.join(","), JSON.stringify(task.params ?? null), JSON.stringify(runParams ?? null), lastRun?.id ?? ""].join("\u0001");
+      return contextCache.current.get(String(idx), key, () => ({
+        params: mergeParams(runParams, task.params),
+        paramsSource: "run params merged with this task's params (task wins)",
+        inputs: task.depends_on.map((dep) => {
+          const value = lastRun?.results[dep];
+          return value === undefined
+            ? { name: dep, source: runLabel ? `task ${dep} · no result in ${runLabel}` : `task ${dep} · no runs yet` }
+            : { name: dep, value, source: `task ${dep} · result from ${runLabel}` };
+        }),
+        inputsSource: "results of the tasks marked “after”",
+      }));
+    });
+    contextCache.current.prune(spec.tasks.map((_, i) => String(i)));
+    return out;
+  }, [spec.tasks, spec.params, paramsDraft, lastRun]);
 
   /** Builder state with the params JSON field folded in. Throws on bad JSON. */
   const composed = (): WorkflowSpec => {
@@ -383,6 +451,7 @@ export default function WorkflowBuilder({
                   language={task.runtime}
                   minRows={6}
                   onChange={(code) => patchTask(idx, { code })}
+                  typeContext={taskContexts[idx]}
                 />
               </div>
             );

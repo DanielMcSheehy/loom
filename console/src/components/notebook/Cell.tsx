@@ -17,10 +17,13 @@ import {
   Warning,
   X,
 } from "@phosphor-icons/react";
-import { memo } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import type { ChartConfig, Connector, NotebookCell, ResultViewKind, RuntimeName } from "../../types";
 import CodeEditor, { type CodeLanguage } from "../CodeEditor";
+import type { TypeContext } from "../editor/context";
 import Markdown from "../Markdown";
+import { setImageWidth } from "../markdown/images";
+import { appendBlock, fileToMarkdown, findEditorView, imageFiles, insertBlockAt } from "../markdown/insertImage";
 import ResultView from "../ResultView";
 import { CODE_TEMPLATE } from "./cells";
 
@@ -33,6 +36,8 @@ export interface CellProps {
   stale: boolean;
   editing: boolean;
   deps: Array<{ id: string; label: string }>;
+  /** What this cell's handler receives (outputs of cells above); code cells only. */
+  typeContext?: TypeContext;
   connectors: Connector[];
   onPatch: (patch: Partial<NotebookCell>) => void;
   onRun: () => void;
@@ -55,6 +60,64 @@ function Cell(p: CellProps) {
   const language = (cell.kind === "sql" ? "sql" : isMd ? "markdown" : (cell.runtime ?? "python")) as CodeLanguage;
   const outputValue = cell.output?.ok ? (cell.output.rows ?? cell.output.result) : undefined;
   const lines = cell.code.split("\n").length;
+
+  // Markdown images: a dragged width persists into the source as `![alt|320](url)`.
+  const codeRef = useRef(cell.code);
+  codeRef.current = cell.code;
+  const { onPatch } = p;
+  const onImageResize = useCallback(
+    (index: number, width: number | null, src: string) => onPatch({ code: setImageWidth(codeRef.current, index, width, src) }),
+    [onPatch],
+  );
+
+  // Pasted / dropped image files land in the markdown editor as data: URLs.
+  const editorHost = useRef<HTMLDivElement>(null);
+  const [embedding, setEmbedding] = useState(0);
+  const [dropTarget, setDropTarget] = useState(false);
+  const embedImages = useCallback(
+    async (files: File[], at?: { x: number; y: number }) => {
+      setEmbedding((n) => n + files.length);
+      try {
+        const md = (await Promise.all(files.map(fileToMarkdown))).join("\n");
+        const view = await findEditorView(editorHost.current);
+        if (view) insertBlockAt(view, md, at);
+        else onPatch({ code: appendBlock(codeRef.current, md) });
+      } finally {
+        setEmbedding((n) => Math.max(0, n - files.length));
+      }
+    },
+    [onPatch],
+  );
+  const mdEditorEvents = isMd
+    ? {
+        // Capture phase: runs before CodeMirror's own paste/drop listeners,
+        // which would otherwise try to read the file as text.
+        onPasteCapture: (e: React.ClipboardEvent) => {
+          const files = imageFiles(e.clipboardData);
+          if (files.length === 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          void embedImages(files);
+        },
+        onDragOverCapture: (e: React.DragEvent) => {
+          if (!e.dataTransfer?.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          if (!dropTarget) setDropTarget(true);
+        },
+        onDragLeaveCapture: (e: React.DragEvent) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(false);
+        },
+        onDropCapture: (e: React.DragEvent) => {
+          setDropTarget(false);
+          const files = imageFiles(e.dataTransfer);
+          if (files.length === 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          void embedImages(files, { x: e.clientX, y: e.clientY });
+        },
+      }
+    : {};
 
   return (
     <div
@@ -153,7 +216,7 @@ function Cell(p: CellProps) {
 
         {isMd && !editing ? (
           <div onDoubleClick={() => p.onSetEditing(true)} style={{ position: "relative" }}>
-            <Markdown source={cell.code || "*Empty markdown cell. Double-click to edit.*"} />
+            <Markdown source={cell.code || "*Empty markdown cell. Double-click to edit.*"} onImageResize={onImageResize} />
             <span className="cell-actions" style={{ position: "absolute", top: 4, right: 0 }}>
               <button title="Edit" onClick={() => p.onSetEditing(true)}><PencilSimple size={14} /></button>
               <button title="Move up" onClick={() => p.onMove(-1)}><ArrowUp size={14} /></button>
@@ -166,7 +229,8 @@ function Cell(p: CellProps) {
             <CaretRight size={11} /> {lines} line{lines === 1 ? "" : "s"} of {cell.kind === "sql" ? "SQL" : cell.runtime} hidden
           </div>
         ) : (
-          <div className="cell-editor">
+          <div className={`cell-editor${dropTarget ? " md-drop-target" : ""}`} ref={editorHost} style={isMd ? { position: "relative" } : undefined} {...mdEditorEvents}>
+            {embedding > 0 && <span className="md-embedding">embedding image…</span>}
             <CodeEditor
               value={cell.code}
               language={language}
@@ -177,6 +241,7 @@ function Cell(p: CellProps) {
               onShiftRun={isMd ? () => { p.onSetEditing(false); p.onRunAdvance(); } : p.onRunAdvance}
               onEscape={isMd ? () => p.onSetEditing(false) : p.onBlur}
               onFocus={p.onFocus}
+              typeContext={cell.kind === "code" ? p.typeContext : undefined}
             />
           </div>
         )}

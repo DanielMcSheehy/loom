@@ -1,0 +1,39 @@
+/* Chart extras: radar grid, statistic-line band, colour picker popover.
+   Tokens come from styles.css so both themes work. */
+
+.chart .grid polygon { fill: none; stroke: var(--grid); stroke-width: 1; }
+.chart .radar-hot { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.chart .axis-label { fill: var(--ink-2); font-size: 11px; }
+
+/* builder: statistic-line checks */
+.cb-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.cb-stats .cb-check { text-transform: none; letter-spacing: 0; }
+.cb-field > span.cb-hint { font-size: 11.5px; color: var(--ink-4); text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* builder: per-series colours */
+.cb-colors { display: flex; flex-direction: column; gap: 2px; }
+.cb-color-row { position: relative; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); min-height: 24px; }
+.cb-color-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cb-color-row .reset { border: none; background: none; color: var(--ink-4); cursor: pointer; font-size: 12px; padding: 0 4px; line-height: 1; }
+.cb-color-row .reset:hover { color: var(--ink); }
+.color-swatch-btn {
+  width: 18px; height: 18px; border-radius: 5px; padding: 0; cursor: pointer; flex-shrink: 0;
+  border: 1px solid var(--border-strong); box-shadow: inset 0 0 0 2px var(--surface);
+}
+.color-swatch-btn:hover { border-color: var(--ink-3); }
+.color-swatch-btn.on { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--surface), 0 0 0 2px var(--accent-ring); }
+.color-pop {
+  position: absolute; z-index: 20; left: 0; bottom: 26px; width: 208px;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r);
+  box-shadow: var(--shadow); padding: 10px; display: flex; flex-direction: column; gap: 9px;
+}
+.color-pop .pop-title { font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; }
+.color-pop .pop-title .name { color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.color-pop .cp-swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
+.color-pop .cp-swatches button { width: 100%; aspect-ratio: 1; border-radius: 5px; border: 1px solid transparent; cursor: pointer; padding: 0; }
+.color-pop .cp-swatches button:hover { border-color: var(--ink-3); }
+.color-pop .cp-swatches button.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.color-pop .custom { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+.color-pop .custom input[type="color"] { width: 30px; height: 24px; padding: 1px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); cursor: pointer; }
+.color-pop .custom code { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-left: auto; }
+.color-pop .pop-actions { display: flex; gap: 6px; justify-content: flex-end; }

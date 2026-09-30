@@ -2,8 +2,15 @@
 // the outline), bold/italic/strike, inline + fenced code, ordered and
 // unordered lists, blockquotes, links, images, tables, rules. Input is
 // escaped before formatting so cells can't inject markup.
-import { useMemo } from "react";
+//
+// Images: `![alt](url)` with http(s), data:image/* or relative urls, plus
+// the Obsidian size suffix `![alt|320](url)` / `![alt|320x200](url)`. Each
+// is wrapped in `.md-img` with its ordinal so `useImageResize` can write a
+// dragged width back into the source (see markdown/images.ts).
+import { useMemo, useRef } from "react";
 import { highlight, type CodeLanguage } from "./CodeBlock";
+import { IMAGE_RE, parseAlt, safeImageUrl } from "./markdown/images";
+import { useImageResize, type ImageResizeHandler } from "./markdown/ImageResize";
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -11,14 +18,43 @@ const escapeHtml = (s: string) =>
 export const slug = (s: string) =>
   s.toLowerCase().replace(/<[^>]+>/g, "").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 64);
 
-function inline(s: string): string {
-  return s
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
+const unescapeHtml = (s: string) =>
+  s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/** Per-render state: images are numbered in source order so resize edits can find them again. */
+interface RenderCtx {
+  images: number;
+}
+
+function image(ctx: RenderCtx, rawAlt: string, escapedUrl: string): string {
+  const url = unescapeHtml(escapedUrl);
+  const { alt, width, height } = parseAlt(rawAlt);
+  const index = ctx.images++;
+  // Unsafe scheme: no <img> at all, just a labelled placeholder (keeps the ordinal).
+  if (!safeImageUrl(url)) return `<span class="md-img md-img-blocked" data-md-index="${index}" title="Image blocked: only http(s), data:image and relative urls are allowed">${alt || "image"}</span>`;
+  const attrs: string[] = [`alt="${alt}"`, `src="${escapedUrl}"`, 'loading="lazy"', 'draggable="false"'];
+  if (width) {
+    attrs.push(`width="${width}"`, `style="width:${width}px"`);
+    if (height) attrs.push(`height="${height}"`);
+  }
+  return `<span class="md-img" data-md-index="${index}" data-md-src="${escapedUrl}"><img ${attrs.join(" ")} /><span class="md-img-size"></span><span class="md-img-handle" title="Drag to resize · double-click for natural size"></span></span>`;
+}
+
+function inline(s: string, ctx: RenderCtx): string {
+  // Code spans are lifted out first so their contents are never formatted
+  // (`**x**` or `![a](b)` inside backticks stay literal).
+  const codes: string[] = [];
+  const out = s
+    .replace(/`([^`]+)`/g, (_, c: string) => {
+      codes.push(`<code>${c}</code>`);
+      return `\u0000${codes.length - 1}\u0000`;
+    })
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
     .replace(/~~([^~]+)~~/g, "<del>$1</del>")
-    .replace(/!\[([^\]]*)\]\((https?:[^)\s]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:6px" />')
+    .replace(IMAGE_RE, (_, alt: string, url: string) => image(ctx, alt, url))
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+|#[^)\s]*)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i: string) => codes[Number(i)]);
 }
 
 const LANGS: Record<string, CodeLanguage> = { python: "python", py: "python", ts: "typescript", typescript: "typescript", js: "javascript", javascript: "javascript", sql: "sql", json: "json", md: "markdown" };
@@ -26,6 +62,8 @@ const LANGS: Record<string, CodeLanguage> = { python: "python", py: "python", ts
 export function renderMarkdown(src: string): string {
   const lines = src.split("\n");
   const out: string[] = [];
+  const ctx: RenderCtx = { images: 0 };
+  const fmt = (s: string) => inline(s, ctx);
   let code: string[] | null = null;
   let codeLang = "";
   let list: "ul" | "ol" | null = null;
@@ -37,8 +75,8 @@ export function renderMarkdown(src: string): string {
   const closeTable = () => {
     if (!table) return;
     const [head, ...body] = table;
-    out.push("<table><thead><tr>" + head.map((h) => `<th>${inline(h)}</th>`).join("") + "</tr></thead><tbody>");
-    for (const r of body) out.push("<tr>" + r.map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>");
+    out.push("<table><thead><tr>" + head.map((h) => `<th>${fmt(h)}</th>`).join("") + "</tr></thead><tbody>");
+    for (const r of body) out.push("<tr>" + r.map((c) => `<td>${fmt(c)}</td>`).join("") + "</tr>");
     out.push("</tbody></table>");
     table = null;
   };
@@ -62,7 +100,8 @@ export function renderMarkdown(src: string): string {
       continue;
     }
     if (/^\s*\|.*\|\s*$/.test(line)) {
-      const cells = line.trim().slice(1, -1).split("|").map((c) => c.trim());
+      // `\|` is a literal pipe inside a cell (needed for `![alt\|320](url)`).
+      const cells = line.trim().slice(1, -1).split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
       if (cells.every((c) => /^:?-{2,}:?$/.test(c))) continue;
       closeList();
       (table ??= []).push(cells);
@@ -73,7 +112,7 @@ export function renderMarkdown(src: string): string {
     if (h) {
       closeList();
       const level = h[1].length;
-      out.push(`<h${level} id="${slug(h[2])}">${inline(h[2])}</h${level}>`);
+      out.push(`<h${level} id="${slug(h[2])}">${fmt(h[2])}</h${level}>`);
       continue;
     }
     if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
@@ -90,17 +129,17 @@ export function renderMarkdown(src: string): string {
         out.push(`<${kind}>`);
         list = kind;
       }
-      out.push(`<li>${inline((ul ?? ol)![1])}</li>`);
+      out.push(`<li>${fmt((ul ?? ol)![1])}</li>`);
       continue;
     }
     closeList();
     const bq = line.match(/^\s*&gt;\s?(.*)/);
     if (bq) {
-      out.push(`<blockquote>${inline(bq[1])}</blockquote>`);
+      out.push(`<blockquote>${fmt(bq[1])}</blockquote>`);
       continue;
     }
     if (line.trim() === "") continue;
-    out.push(`<p>${inline(line)}</p>`);
+    out.push(`<p>${fmt(line)}</p>`);
   }
   closeList();
   closeTable();
@@ -120,7 +159,9 @@ export function headings(src: string): Array<{ level: number; text: string; id: 
   return out;
 }
 
-export default function Markdown({ source }: { source: string }) {
+export default function Markdown({ source, onImageResize }: { source: string; onImageResize?: ImageResizeHandler }) {
   const html = useMemo(() => renderMarkdown(source), [source]);
-  return <div className="markdown" dangerouslySetInnerHTML={{ __html: html }} />;
+  const ref = useRef<HTMLDivElement>(null);
+  useImageResize(ref, onImageResize);
+  return <div ref={ref} className="markdown" dangerouslySetInnerHTML={{ __html: html }} />;
 }

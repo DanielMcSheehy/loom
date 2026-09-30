@@ -128,59 +128,63 @@ export default function CellInserter({
 
   return (
     <div className={`inserter${open ? " open" : ""}${last ? " last" : ""}`} ref={ref}>
-      <button className="plus" title="Insert cell" onClick={() => setOpen((o) => !o)} aria-label="Insert cell">
-        <Plus size={13} weight="bold" />
-      </button>
-      {last && !open && (
-        <button className="btn sm ghost" style={{ marginLeft: "calc(50% + 20px)", color: "var(--ink-3)" }} onClick={() => setOpen(true)}>
-          Add cell
+      {/* .plus-col spans the cell column only (the gutter is column 1), so the
+          "+" and the picker are centred on the cells, not on the whole row. */}
+      <div className="plus-col">
+        <button className="plus" title="Insert cell" onClick={() => setOpen((o) => !o)} aria-label="Insert cell">
+          <Plus size={13} weight="bold" />
         </button>
-      )}
-      {open && (
-        <div className="picker" onKeyDown={onKey}>
-          <div className="palette-input">
-            <MagnifyingGlass size={16} />
-            <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Add a cell: Python, SQL, chart, dataset…" />
-            <span className="kbd">esc</span>
-          </div>
-          {primaries.length > 0 && (
-            <div className="picker-grid">
-              {primaries.map((c, i) => (
-                <button key={c.id} className={`picker-item${sel === i ? " sel" : ""}`} onMouseEnter={() => setSel(i)} onClick={() => pick(c)}>
-                  <span className={`ico ${c.iconCls}`}>{c.icon}</span>
-                  <span>
-                    <span className="t">{c.title}</span>
-                    <span className="d">{c.desc}</span>
-                  </span>
-                </button>
-              ))}
+        {last && !open && (
+          <button className="btn sm ghost add-label" style={{ color: "var(--ink-3)" }} onClick={() => setOpen(true)}>
+            Add cell
+          </button>
+        )}
+        {open && (
+          <div className="picker" onKeyDown={onKey}>
+            <div className="palette-input">
+              <MagnifyingGlass size={16} />
+              <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Add a cell: Python, SQL, chart, dataset…" />
+              <span className="kbd">esc</span>
             </div>
-          )}
-          <div className="picker-list">
-            {!needle && <div className="palette-group">Templates</div>}
-            {rest.length === 0 && <div className="empty" style={{ padding: 16 }}>No matches</div>}
-            {rest.map((c, j) => {
-              const i = primaries.length + j;
-              return (
-                <div key={c.id} className={`palette-item${sel === i ? " sel" : ""}`} onMouseEnter={() => setSel(i)} onClick={() => pick(c)}>
-                  <span className={`ico ${c.iconCls}`} style={{ background: "var(--surface-2)" }}>
-                    {c.icon}
-                  </span>
-                  <div>
-                    <div className="t">{c.title}</div>
-                    <div className="d">{c.desc}</div>
+            {primaries.length > 0 && (
+              <div className="picker-grid">
+                {primaries.map((c, i) => (
+                  <button key={c.id} className={`picker-item${sel === i ? " sel" : ""}`} onMouseEnter={() => setSel(i)} onClick={() => pick(c)}>
+                    <span className={`ico ${c.iconCls}`}>{c.icon}</span>
+                    <span>
+                      <span className="t">{c.title}</span>
+                      <span className="d">{c.desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="picker-list">
+              {!needle && <div className="palette-group">Templates</div>}
+              {rest.length === 0 && <div className="empty" style={{ padding: 16 }}>No matches</div>}
+              {rest.map((c, j) => {
+                const i = primaries.length + j;
+                return (
+                  <div key={c.id} className={`palette-item${sel === i ? " sel" : ""}`} onMouseEnter={() => setSel(i)} onClick={() => pick(c)}>
+                    <span className={`ico ${c.iconCls}`} style={{ background: "var(--surface-2)" }}>
+                      {c.icon}
+                    </span>
+                    <div>
+                      <div className="t">{c.title}</div>
+                      <div className="d">{c.desc}</div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+            <div className="palette-foot">
+              <span><span className="kbd">↑↓</span> choose</span>
+              <span><span className="kbd">↵</span> insert</span>
+              <span>type to search templates and datasets</span>
+            </div>
           </div>
-          <div className="palette-foot">
-            <span><span className="kbd">↑↓</span> choose</span>
-            <span><span className="kbd">↵</span> insert</span>
-            <span>type to search templates and datasets</span>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, timeAgo, useEvents } from "../api";
 import { useCrumbs } from "../App";
 import CodeEditor, { CodeBlock } from "../components/CodeEditor";
+import type { TypeContext } from "../components/editor/context";
 import ResultView from "../components/ResultView";
 import { Banner, Empty, RuntimeBadge, useConfirm, useToast } from "../components/ui";
 import type { LoomFunction, RuntimeName } from "../types";
@@ -112,6 +113,25 @@ export default function Functions() {
   const results = selected ? history[selected.spec.name] ?? [] : [];
   const latest = results[0];
 
+  // Editor context: `params` from the playground box (falling back to the
+  // last invocation's params while the box holds invalid JSON); functions
+  // receive no `inputs`.
+  const typeContext = useMemo((): TypeContext => {
+    let value: unknown;
+    let source = "params from the Playground box";
+    try {
+      value = invokeParams.trim() ? (JSON.parse(invokeParams) as unknown) : {};
+    } catch {
+      try {
+        value = latest?.params ? (JSON.parse(latest.params) as unknown) : undefined;
+        source = "params from the last invocation";
+      } catch {
+        value = undefined;
+      }
+    }
+    return { params: value, paramsSource: source, inputs: [], inputsSource: "functions are invoked without inputs" };
+  }, [invokeParams, latest?.params]);
+
   return (
     <div className="content wide">
       {confirmDialog}
@@ -164,7 +184,7 @@ export default function Functions() {
                   </label>
                   <label className="field" style={{ flex: "0 0 120px" }}><span>Timeout (s)</span><input type="number" value={timeout} min={1} onChange={(e) => setTimeoutSecs(Number(e.target.value))} /></label>
                 </div>
-                <label className="field"><span>Handler</span><div className="editor-wrap"><CodeEditor value={code} language={runtime} minRows={12} onChange={setCode} /></div></label>
+                <label className="field"><span>Handler</span><div className="editor-wrap"><CodeEditor value={code} language={runtime} minRows={12} onChange={setCode} typeContext={typeContext} /></div></label>
               </div>
             </div>
           ) : !selected ? (
@@ -198,7 +218,7 @@ export default function Functions() {
                 </div>
                 {error && <div className="card-body" style={{ paddingBottom: 0 }}><Banner kind="error">{error}</Banner></div>}
                 {editing ? (
-                  <div className="editor-wrap"><div className="cm-host" style={{ border: "none", borderRadius: 0 }}><CodeEditor value={editCode} language={editRuntime} minRows={12} autoFocus onChange={setEditCode} /></div></div>
+                  <div className="editor-wrap"><div className="cm-host" style={{ border: "none", borderRadius: 0 }}><CodeEditor value={editCode} language={editRuntime} minRows={12} autoFocus onChange={setEditCode} typeContext={typeContext} /></div></div>
                 ) : (
                   <CodeBlock code={selected.spec.code} language={selected.spec.runtime} className="fn-code" />
                 )}

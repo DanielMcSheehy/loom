@@ -137,7 +137,7 @@ export default function WorkflowDetail() {
       {editing && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-head"><h2>Edit workflow</h2></div>
-          <div className="card-body"><WorkflowBuilder initial={workflow.spec} submitLabel="Save changes" onSubmit={save} /></div>
+          <div className="card-body"><WorkflowBuilder initial={workflow.spec} workflowId={id} submitLabel="Save changes" onSubmit={save} /></div>
         </div>
       )}
 

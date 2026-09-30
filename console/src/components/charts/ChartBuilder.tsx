@@ -6,6 +6,7 @@ import {
   ChartBarHorizontal,
   ChartLine,
   ChartPieSlice,
+  ChartPolar,
   ChartScatter,
   Lightning,
   Rows,
@@ -13,7 +14,9 @@ import {
 } from "@phosphor-icons/react";
 import { useMemo } from "react";
 import Chart from "./Chart";
-import { inferColumns, suggestSpec, type ChartSpec, type ColumnInfo, type Mark, type Row } from "./data";
+import ColorPicker from "./ColorPicker";
+import { inferColumns, prepare, STATS, suggestSpec, type ChartSpec, type ColumnInfo, type Mark, type Row, type Stat } from "./data";
+import "./charts.css";
 
 const MARKS: Array<{ mark: Mark; label: string; icon: React.ReactNode }> = [
   { mark: "bar", label: "Bar", icon: <ChartBar size={18} /> },
@@ -23,7 +26,10 @@ const MARKS: Array<{ mark: Mark; label: string; icon: React.ReactNode }> = [
   { mark: "scatter", label: "Scatter", icon: <ChartScatter size={18} /> },
   { mark: "pie", label: "Donut", icon: <ChartPieSlice size={18} /> },
   { mark: "histogram", label: "Histogram", icon: <Rows size={18} /> },
+  { mark: "radar", label: "Radar", icon: <ChartPolar size={18} /> },
 ];
+
+const STAT_LABEL: Record<Stat, string> = { avg: "avg", min: "min", max: "max", median: "median" };
 
 export function defaultSpec(rows: Row[], cols?: ColumnInfo[]): ChartSpec | null {
   return suggestSpec(cols ?? inferColumns(rows), rows);
@@ -46,8 +52,28 @@ export default function ChartBuilder({
   const numeric = cols.filter((c) => c.type === "number");
   const dimensions = cols.filter((c) => c.type !== "object");
   const set = (patch: Partial<ChartSpec>) => onChange({ ...spec, ...patch });
-  const isBand = spec.mark === "bar" || spec.mark === "hbar" || spec.mark === "pie";
+  const isBand = spec.mark === "bar" || spec.mark === "hbar" || spec.mark === "pie" || spec.mark === "radar";
   const multiY = spec.mark !== "pie" && spec.mark !== "scatter" && spec.mark !== "histogram" && !spec.color;
+  const isLine = spec.mark === "line" || spec.mark === "area";
+  const stats = isLine ? (spec.stats ?? []) : [];
+  const statsOn = stats.length > 0;
+  const xInfo = cols.find((c) => c.name === spec.x);
+  const xDupes = !!xInfo && rows.length > xInfo.distinct + xInfo.nulls;
+  const toggleStat = (st: Stat, on: boolean) => {
+    const next = on ? [...stats, st] : stats.filter((x) => x !== st);
+    set({ stats: next.length ? STATS.filter((x) => next.includes(x)) : undefined });
+  };
+
+  // Names the colour picker can override: series (or donut slices).
+  const colorEntries = useMemo(() => {
+    if (spec.mark === "histogram") return [];
+    const prepared = prepare(rows, spec, cols);
+    if (spec.mark === "pie" && prepared.series.length === 1) {
+      const slices = prepared.series[0].points.map((p, i) => ({ name: String(p.x), slot: i }));
+      return slices.length > 8 ? [...slices.slice(0, 7), { name: "Other", slot: 7 }] : slices;
+    }
+    return prepared.series.map((s) => ({ name: s.name, slot: s.slot }));
+  }, [rows, spec, cols]);
 
   return (
     <div className="chart-builder">
@@ -73,6 +99,12 @@ export default function ChartBuilder({
                     next.agg = "none";
                     next.x = numeric.find((c) => c.name !== next.y[0])?.name ?? next.x;
                   }
+                  if (m.mark === "radar") {
+                    // Axes want a categorical x; prefer a string column with few values.
+                    const cat = dimensions.find((c) => c.type === "string" && c.distinct >= 3 && c.distinct <= 24);
+                    if (!dimensions.some((c) => c.name === next.x && c.type !== "number") && cat) next.x = cat.name;
+                    next.stack = undefined;
+                  }
                   onChange(next);
                 }}
               >
@@ -95,7 +127,7 @@ export default function ChartBuilder({
         </div>
 
         <div className="cb-field">
-          <span>{spec.mark === "histogram" ? "Values" : spec.mark === "pie" ? "Slices" : "X axis"}</span>
+          <span>{spec.mark === "histogram" ? "Values" : spec.mark === "pie" ? "Slices" : spec.mark === "radar" ? (spec.radarAxes === "measures" && spec.y.length > 1 ? "Series" : "Axes") : "X axis"}</span>
           <select value={spec.x} onChange={(e) => set({ x: e.target.value })}>
             {(spec.mark === "histogram" ? numeric : dimensions).map((c) => (
               <option key={c.name} value={c.name}>
@@ -151,6 +183,45 @@ export default function ChartBuilder({
           </div>
         )}
 
+        {spec.mark === "radar" && spec.y.length > 1 && !spec.color && (
+          <div className="cb-field">
+            <span>Axes from</span>
+            <div className="seg" style={{ alignSelf: "flex-start" }}>
+              <button className={spec.radarAxes !== "measures" ? "on" : ""} onClick={() => set({ radarAxes: undefined })} title="One axis per distinct x value; one polygon per measure">
+                {spec.x} values
+              </button>
+              <button className={spec.radarAxes === "measures" ? "on" : ""} onClick={() => set({ radarAxes: "measures" })} title="One axis per measure; one polygon per x value">
+                measures
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isLine && (
+          <div className="cb-field">
+            <span>Lines</span>
+            <div className="cb-stats">
+              {STATS.map((st) => (
+                <label className="cb-check" key={st}>
+                  <input type="checkbox" checked={stats.includes(st)} onChange={(e) => toggleStat(st, e.target.checked)} /> {STAT_LABEL[st]}
+                </label>
+              ))}
+              <label className="cb-check" title="Shade the min–max envelope">
+                <input type="checkbox" checked={!!spec.band && statsOn} disabled={!statsOn} onChange={(e) => set({ band: e.target.checked || undefined })} /> band
+              </label>
+            </div>
+            <span className="cb-hint">
+              {statsOn
+                ? xDupes
+                  ? "One line per statistic of the values sharing an x."
+                  : "x values are unique — every statistic equals the raw value."
+                : xDupes
+                  ? `${spec.x} repeats; pick statistics to draw several lines.`
+                  : "Statistics of repeated x values (none here)."}
+            </span>
+          </div>
+        )}
+
         {spec.mark !== "histogram" && spec.mark !== "pie" && (
           <div className="cb-field">
             <span>Color by</span>
@@ -167,7 +238,7 @@ export default function ChartBuilder({
           </div>
         )}
 
-        {spec.mark !== "histogram" && spec.mark !== "scatter" && (
+        {spec.mark !== "histogram" && spec.mark !== "scatter" && !statsOn && (
           <div className="cb-field">
             <span>Aggregate</span>
             <select value={spec.agg ?? "none"} onChange={(e) => set({ agg: e.target.value as ChartSpec["agg"] })}>
@@ -201,7 +272,7 @@ export default function ChartBuilder({
         )}
 
         <div className="cb-field" style={{ gap: 6 }}>
-          {(spec.mark === "bar" || spec.mark === "hbar" || spec.mark === "area") && (
+          {(spec.mark === "bar" || spec.mark === "hbar" || spec.mark === "area") && !statsOn && (
             <label className="cb-check">
               <input type="checkbox" checked={!!spec.stack} onChange={(e) => set({ stack: e.target.checked })} /> Stack series
             </label>
@@ -222,6 +293,13 @@ export default function ChartBuilder({
             </label>
           )}
         </div>
+
+        {colorEntries.length > 0 && (
+          <div className="cb-field">
+            <span>Colors</span>
+            <ColorPicker entries={colorEntries} colors={spec.colors} onChange={(colors) => set({ colors })} />
+          </div>
+        )}
       </div>
       <div className="cb-main">
         <Chart rows={rows} spec={spec} height={height} columns={cols} />

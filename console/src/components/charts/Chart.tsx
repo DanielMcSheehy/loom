@@ -1,5 +1,5 @@
 // Responsive SVG chart: bar / horizontal bar / line / area / scatter / pie /
-// histogram over row objects. One hue per series from the categorical
+// histogram / radar over row objects. One hue per series from the categorical
 // palette, thin marks, recessive grid, hover tooltip + crosshair, clickable
 // legend. Colours come from CSS tokens so both themes work.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,7 @@ import {
   type Prepared,
   type Row,
 } from "./data";
+import "./charts.css";
 
 export const seriesColor = (slot: number) => `var(--s${(slot % 8) + 1})`;
 
@@ -41,6 +42,8 @@ interface Tooltip {
   rows: Array<{ name: string; color: string; value: string }>;
   cx?: number;
   marks?: Array<{ x: number; y: number; color: string }>;
+  /** Radar: highlighted spoke. */
+  spoke?: { x1: number; y1: number; x2: number; y2: number };
 }
 
 export type ColorOf = (s: { name: string; slot: number }) => string;
@@ -61,13 +64,15 @@ export default function Chart({
   /** Fixed colours by series name (e.g. run states); others use the palette. */
   colors?: Record<string, string>;
 }) {
-  const colorOf: ColorOf = (s) => colors?.[s.name] ?? seriesColor(s.slot);
+  // Precedence: user override saved in the spec → caller's fixed map (run
+  // states) → categorical palette slot.
+  const colorOf: ColorOf = (s) => spec.colors?.[s.name] ?? colors?.[s.name] ?? seriesColor(s.slot);
   const [ref, width] = useWidth<HTMLDivElement>();
   const cols = useMemo(() => columns ?? inferColumns(rows), [columns, rows]);
   const prepared = useMemo(() => prepare(rows, spec, cols), [rows, spec, cols]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [tip, setTip] = useState<Tooltip | null>(null);
-  useEffect(() => setHidden(new Set()), [spec.mark, spec.x, spec.color, spec.y.join("|")]);
+  useEffect(() => setHidden(new Set()), [spec.mark, spec.x, spec.color, spec.y.join("|"), spec.stats?.join("|"), spec.band, spec.radarAxes]);
 
   const visible = useMemo(
     () => ({ ...prepared, series: prepared.series.filter((s) => !hidden.has(s.name)) }),
@@ -110,6 +115,8 @@ export default function Chart({
       {width > 0 &&
         (spec.mark === "pie" ? (
           <Pie prepared={visible} width={width} height={height} setTip={setTip} colorOf={colorOf} />
+        ) : spec.mark === "radar" ? (
+          <Radar prepared={visible} width={width} height={Math.max(height, 340)} spec={spec} setTip={setTip} tip={tip} colorOf={colorOf} />
         ) : spec.mark === "hbar" ? (
           <HBars prepared={visible} width={width} height={height} spec={spec} setTip={setTip} colorOf={colorOf} />
         ) : (
@@ -304,6 +311,10 @@ function XY({
     for (const s of series) {
       const p = s.points.find((q) => q.x === key);
       if (!p) continue;
+      if (s.kind === "band") {
+        rows.push({ name: s.name, color: colorOf(s), value: `${fmtVal(p.y0 ?? p.y)} – ${fmtVal(p.y)}` });
+        continue;
+      }
       const val = stacked ? p.y - (p.y0 ?? 0) : p.y;
       rows.push({ name: s.name, color: colorOf(s), value: fmtVal(val) + (spec.normalize ? "%" : "") });
       marks.push({ x: cx, y: ySc(p.y), color: colorOf(s) });
@@ -385,6 +396,14 @@ function XY({
               ))}
             </g>
           );
+        }
+        if (s.kind === "band") {
+          // Shaded min–max envelope: top edge along max, back along min.
+          const bp = s.points.map((p) => [xSc(p.x, categories.indexOf(p.x as string)), ySc(p.y), ySc(p.y0 ?? p.y)]);
+          if (!bp.length) return null;
+          const top = bp.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+          const bottom = [...bp].reverse().map(([x, , y0]) => `L${x.toFixed(1)},${y0.toFixed(1)}`).join(" ");
+          return <path key={s.name} d={`${top} ${bottom} Z`} fill={color} opacity={0.14} stroke="none" />;
         }
         // line / area
         const pts = s.points.map((p) => [xSc(p.x, categories.indexOf(p.x as string)), ySc(p.y), ySc(p.y0 ?? (logY ? yMin : 0))]);
@@ -602,6 +621,144 @@ function Pie({
           </g>
         ))}
       </g>
+    </svg>
+  );
+}
+
+// ── radar / spider ────────────────────────────────────────────────────
+
+function Radar({
+  prepared,
+  width,
+  height,
+  spec,
+  setTip,
+  tip,
+  colorOf,
+}: {
+  prepared: Prepared;
+  width: number;
+  height: number;
+  spec: ChartSpec;
+  setTip: (t: Tooltip | null) => void;
+  tip: Tooltip | null;
+  colorOf: ColorOf;
+}) {
+  const { series, categories } = prepared;
+  const n = categories.length;
+  const labelW = Math.min(120, Math.max(...categories.map((c) => c.length), 3) * 6.6 + 8);
+  const cx = width / 2;
+  const cy = height / 2;
+  const R = Math.max(20, Math.min(width / 2 - labelW - 12, height / 2 - 26));
+
+  // radial domain: 0 (or the smallest negative) → nice max
+  let vMin = 0;
+  let vMax = -Infinity;
+  for (const s of series)
+    for (const p of s.points) {
+      if (p.y < vMin) vMin = p.y;
+      if (p.y > vMax) vMax = p.y;
+    }
+  if (!Number.isFinite(vMax) || vMax <= vMin) vMax = vMin + 1;
+  const ticks = niceTicks(vMin, vMax, 5);
+  if (ticks.length >= 2 && ticks[ticks.length - 1] < vMax) ticks.push(ticks[ticks.length - 1] + (ticks[1] - ticks[0])); // outer ring bounds the data
+  if (ticks.length) {
+    vMin = Math.min(vMin, ticks[0]);
+    vMax = Math.max(vMax, ticks[ticks.length - 1]);
+  }
+  const rSc = (v: number) => ((v - vMin) / (vMax - vMin || 1)) * R;
+  const ang = (i: number) => -Math.PI / 2 + (i * Math.PI * 2) / Math.max(1, n);
+  const pt = (i: number, r: number): [number, number] => [cx + Math.cos(ang(i)) * r, cy + Math.sin(ang(i)) * r];
+  const ring = (r: number) => categories.map((_, i) => pt(i, r).map((v) => v.toFixed(1)).join(",")).join(" ");
+
+  const polys = series.map((s) => {
+    const pts = categories.map((c, i) => {
+      const p = s.points.find((q) => q.x === c);
+      return p ? { i, v: p.y, xy: pt(i, rSc(p.y)) } : null;
+    });
+    const present = pts.filter((p): p is NonNullable<typeof p> => p !== null);
+    const d = present.length ? present.map((p, k) => `${k ? "L" : "M"}${p.xy[0].toFixed(1)},${p.xy[1].toFixed(1)}`).join(" ") + " Z" : "";
+    return { s, pts: present, d };
+  });
+
+  const onMove = (e: React.MouseEvent<SVGRectElement>) => {
+    const rect = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const dx = px - cx;
+    const dy = py - cy;
+    if (Math.hypot(dx, dy) > R + 28 || n === 0) return setTip(null);
+    const a = Math.atan2(dy, dx) + Math.PI / 2;
+    const i = ((Math.round((a / (Math.PI * 2)) * n) % n) + n) % n;
+    const cat = categories[i];
+    const rows: Tooltip["rows"] = [];
+    const marks: Tooltip["marks"] = [];
+    for (const s of series) {
+      const p = s.points.find((q) => q.x === cat);
+      if (!p) continue;
+      rows.push({ name: s.name, color: colorOf(s), value: fmtVal(p.y) });
+      const [mx, my] = pt(i, rSc(p.y));
+      marks.push({ x: mx, y: my, color: colorOf(s) });
+    }
+    if (!rows.length) return setTip(null);
+    const [sx, sy] = pt(i, R);
+    setTip({ px, py: Math.min(py, height - 20), title: cat, rows, marks, spoke: { x1: cx, y1: cy, x2: sx, y2: sy } });
+  };
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-label={`radar chart of ${spec.y.join(", ")} by ${spec.x}`}>
+      <g className="grid">
+        {ticks.filter((t) => t > vMin).map((t) => (
+          <polygon key={t} points={ring(rSc(t))} />
+        ))}
+      </g>
+      <g className="axis">
+        {categories.map((_, i) => {
+          const [x2, y2] = pt(i, R);
+          return <line key={i} x1={cx} y1={cy} x2={x2} y2={y2} />;
+        })}
+      </g>
+      {tip?.spoke && <line className="radar-hot" x1={tip.spoke.x1} y1={tip.spoke.y1} x2={tip.spoke.x2} y2={tip.spoke.y2} />}
+      <g className="tick">
+        {ticks.filter((t) => t > vMin).map((t) => (
+          <text key={t} x={cx + 5} y={cy - rSc(t) + 3.5} style={{ fontSize: 10 }}>
+            {fmtVal(t)}
+          </text>
+        ))}
+        {categories.map((c, i) => {
+          const cos = Math.cos(ang(i));
+          const sin = Math.sin(ang(i));
+          const [x, y] = pt(i, R + 12);
+          const anchor = Math.abs(cos) < 0.25 ? "middle" : cos > 0 ? "start" : "end";
+          return (
+            <text key={c} className="axis-label" x={x} y={y + (Math.abs(cos) < 0.25 ? (sin < 0 ? -2 : 10) : 3.5)} textAnchor={anchor}>
+              {trunc(c, 18)}
+            </text>
+          );
+        })}
+      </g>
+      {polys.map(({ s, pts, d }) => {
+        const color = colorOf(s);
+        return (
+          <g key={s.name}>
+            {d && <path d={d} fill={color} opacity={0.14} />}
+            {d && <path d={d} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />}
+            {n <= 24 && pts.map((p) => <circle key={p.i} cx={p.xy[0]} cy={p.xy[1]} r={3.5} fill={color} stroke="var(--surface)" strokeWidth={2} />)}
+            {spec.labels && n <= 12 && series.length <= 3 && pts.map((p) => {
+              const [lx, ly] = pt(p.i, rSc(p.v) + 10);
+              return (
+                <text key={`l${p.i}`} className="tick" x={lx} y={ly + 3.5} textAnchor="middle" style={{ fontSize: 10.5, fill: "var(--ink-2)" }}>
+                  {fmtVal(p.v)}
+                </text>
+              );
+            })}
+          </g>
+        );
+      })}
+      {tip?.marks?.map((m, i) => (
+        <circle key={i} cx={m.x} cy={m.y} r={5} fill={m.color} stroke="var(--surface)" strokeWidth={2} pointerEvents="none" />
+      ))}
+      <rect x={0} y={0} width={width} height={height} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setTip(null)} />
     </svg>
   );
 }

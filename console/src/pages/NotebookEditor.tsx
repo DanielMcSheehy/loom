@@ -3,11 +3,18 @@
 // (inputs = outputs of cells above), /api/query for SQL. Named cells feed
 // cells below as inputs[name]; when a cell runs, cells that read from it
 // re-run automatically (reactive mode), like Observable's dataflow.
+//
+// Saving: every edit autosaves to the server (debounced), so nothing is lost.
+// On top of that the editor keeps a *checkpoint* — the document as it was at
+// page load or at the last explicit Save (button / ⌘S). "Discard changes"
+// returns to the checkpoint; both Save and Discard show a toast with Undo.
 import {
+  ArrowCounterClockwise,
   ArrowsClockwise,
   Broom,
   DotsThree,
   DownloadSimple,
+  FloppyDisk,
   Lightning,
   Play,
   Trash,
@@ -19,6 +26,7 @@ import { useCrumbs } from "../App";
 import { headings } from "../components/Markdown";
 import Cell from "../components/notebook/Cell";
 import CellInserter from "../components/notebook/CellInserter";
+import { ContextCache, type TypeContext } from "../components/editor/context";
 import {
   cellInputs,
   dependencies,
@@ -27,11 +35,20 @@ import {
   fingerprint,
   isStale,
   newCellId,
+  outputValue,
 } from "../components/notebook/cells";
 import { useClickOutside, useConfirm, useToast } from "../components/ui";
 import type { CellOutput, Connector, Dataset, Notebook, NotebookCell } from "../types";
 
 const SQL_LIMIT = 5000;
+
+/** The document as of page load or the last explicit save. */
+interface Checkpoint {
+  name: string;
+  cells: NotebookCell[];
+  /** What "Discard changes" returns to, for the toast copy. */
+  origin: "load" | "save";
+}
 
 export default function NotebookEditor() {
   const { id } = useParams<{ id: string }>();
@@ -48,6 +65,11 @@ export default function NotebookEditor() {
   const [running, setRunning] = useState<Set<string>>(new Set());
   const [queued, setQueued] = useState<Set<string>>(new Set());
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
+  const saveStateRef = useRef<typeof saveState>("saved");
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [checkpoint, setCheckpoint] = useState<Checkpoint | null>(null);
+  const checkpointRef = useRef<Checkpoint | null>(null);
+  const deletedRef = useRef(false);
   const [editing, setEditing] = useState<Set<string>>(new Set());
   const [focused, setFocused] = useState<string | null>(null);
   const [reactive, setReactive] = useState(() => localStorage.getItem("loom.nb.reactive") !== "off");
@@ -58,6 +80,7 @@ export default function NotebookEditor() {
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const queue = useRef<string[]>([]);
   const pumping = useRef(false);
+  const contextCache = useRef(new ContextCache());
   useClickOutside(menuRef, () => setMenuOpen(false), menuOpen);
 
   useCrumbs([{ label: "Notebooks", to: "/notebooks" }, { label: name || "Untitled" }]);
@@ -71,6 +94,10 @@ export default function NotebookEditor() {
       const cs = Array.isArray(nb.cells) ? nb.cells : [];
       cellsRef.current = cs;
       _setCells(cs);
+      setLastSavedAt(nb.updated_at);
+      const cp: Checkpoint = { name: nb.name, cells: cs, origin: "load" };
+      checkpointRef.current = cp;
+      setCheckpoint(cp);
       if (cs.length === 0) setEditing(new Set());
     });
     api.get<Connector[]>("/api/connectors").then(setConnectors).catch(() => {});
@@ -80,27 +107,62 @@ export default function NotebookEditor() {
   useEffect(() => localStorage.setItem("loom.nb.reactive", reactive ? "on" : "off"), [reactive]);
 
   // ── persistence ─────────────────────────────────────────────────────
+  const setSave = useCallback((st: typeof saveState) => {
+    saveStateRef.current = st;
+    setSaveState(st);
+  }, []);
+
+  /** Write the current document to the server. Resolves true on success. */
   const persist = useCallback(async () => {
     clearTimeout(saveTimer.current);
-    setSaveState("saving");
+    if (deletedRef.current) return false;
+    setSave("saving");
     try {
       await api.put(`/api/notebooks/${id}`, { name: nameRef.current, cells: cellsRef.current });
-      setSaveState("saved");
+      setSave("saved");
+      setLastSavedAt(new Date().toISOString());
+      return true;
     } catch (e) {
-      setSaveState("error");
+      setSave("error");
       toast(`Save failed: ${(e as Error).message}`, "error");
+      return false;
     }
-  }, [id, toast]);
+  }, [id, toast, setSave]);
 
   const scheduleSave = useCallback(() => {
-    setSaveState("dirty");
+    setSave("dirty");
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(persist, 700);
-  }, [persist]);
+  }, [persist, setSave]);
+
+  // Don't lose the debounce window: flush a pending autosave when leaving the
+  // page (unmount) and warn on tab close while a save is pending/in flight.
+  useEffect(() => {
+    const onUnload = (e: BeforeUnloadEvent) => {
+      if (saveStateRef.current === "dirty" || saveStateRef.current === "saving") e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      if (saveStateRef.current === "dirty" && !deletedRef.current) {
+        clearTimeout(saveTimer.current);
+        void api.put(`/api/notebooks/${id}`, { name: nameRef.current, cells: cellsRef.current }).catch(() => {});
+      }
+    };
+  }, [id]);
+
+  // Re-render the "Saved · 12s ago" label while idle.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (saveState !== "saved") return;
+    const t = setInterval(() => setTick((x) => x + 1), 5000);
+    return () => clearInterval(t);
+  }, [saveState]);
 
   const setCells = useCallback(
     (updater: NotebookCell[] | ((prev: NotebookCell[]) => NotebookCell[])) => {
       const next = typeof updater === "function" ? updater(cellsRef.current) : updater;
+      if (next === cellsRef.current) return; // no-op update: keep identity, no autosave
       cellsRef.current = next;
       _setCells(next);
       scheduleSave();
@@ -108,20 +170,91 @@ export default function NotebookEditor() {
     [scheduleSave],
   );
 
+  // ── checkpoint: explicit save / discard, each undoable via toast ────
+  /** Replace the whole document (name + cells) and autosave it. */
+  const restore = useCallback(
+    (doc: { name: string; cells: NotebookCell[] }) => {
+      nameRef.current = doc.name;
+      setName(doc.name);
+      setCells(doc.cells);
+    },
+    [setCells],
+  );
+  const setCheckpointBoth = useCallback((cp: Checkpoint) => {
+    checkpointRef.current = cp;
+    setCheckpoint(cp);
+  }, []);
+
+  /** Edits, by identity, since the checkpoint. Every edit builds a new cells
+   *  array and restore() hands the checkpoint's own array back, so reference
+   *  equality is exact here without walking (possibly large) outputs. */
+  const changed = checkpoint !== null && (cells !== checkpoint.cells || name !== checkpoint.name);
+
+  const saveNow = useCallback(async () => {
+    const before = { name: nameRef.current, cells: cellsRef.current };
+    const prevCp = checkpointRef.current;
+    const unchanged = prevCp !== null && before.cells === prevCp.cells && before.name === prevCp.name;
+    if (!(await persist())) return;
+    if (unchanged) return; // just a flush; nothing to undo
+    const saved: Checkpoint = { ...before, origin: "save" };
+    setCheckpointBoth(saved);
+    if (!prevCp) return;
+    // Undo = go back to the previously saved version (the old checkpoint).
+    // That is itself undoable so the just-saved edits are never one click
+    // from gone.
+    toast("Notebook saved", {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          restore({ name: prevCp.name, cells: prevCp.cells });
+          setCheckpointBoth(prevCp);
+          toast(`Reverted to ${prevCp.origin === "save" ? "the previous save" : "the version you opened"}`, {
+            action: {
+              label: "Undo",
+              onClick: () => {
+                restore(before);
+                setCheckpointBoth(saved);
+              },
+            },
+          });
+        },
+      },
+    });
+  }, [persist, restore, setCheckpointBoth, toast]);
+
+  const discardChanges = useCallback(() => {
+    const cp = checkpointRef.current;
+    if (!cp) return;
+    const discarded = { name: nameRef.current, cells: cellsRef.current };
+    if (discarded.cells === cp.cells && discarded.name === cp.name) return;
+    restore({ name: cp.name, cells: cp.cells });
+    toast(`Discarded changes since ${cp.origin === "save" ? "the last save" : "you opened this notebook"}`, {
+      action: { label: "Undo", onClick: () => restore(discarded) },
+    });
+  }, [restore, toast]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        persist();
+        void saveNow();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [persist]);
+  }, [saveNow]);
 
   // ── cell edits ──────────────────────────────────────────────────────
+  // Editors echo an onChange when their document is replaced from outside
+  // (restore / discard), so a patch that changes nothing must keep the cells
+  // array's identity — that identity is what marks the checkpoint as clean.
   const patchCell = useCallback(
-    (cellId: string, patch: Partial<NotebookCell>) => setCells((cs) => cs.map((c) => (c.id === cellId ? { ...c, ...patch } : c))),
+    (cellId: string, patch: Partial<NotebookCell>) =>
+      setCells((cs) => {
+        const cur = cs.find((c) => c.id === cellId);
+        if (!cur || (Object.keys(patch) as Array<keyof NotebookCell>).every((k) => cur[k] === patch[k])) return cs;
+        return cs.map((c) => (c.id === cellId ? { ...c, ...patch } : c));
+      }),
     [setCells],
   );
 
@@ -316,6 +449,8 @@ export default function NotebookEditor() {
   const deleteNotebook = async () => {
     setMenuOpen(false);
     if (!(await confirm({ title: `Delete “${name}”?`, body: "The notebook and all its cells will be removed permanently.", confirmLabel: "Delete notebook" }))) return;
+    clearTimeout(saveTimer.current);
+    deletedRef.current = true;
     await api.delete(`/api/notebooks/${id}`);
     navigate("/notebooks");
   };
@@ -331,6 +466,39 @@ export default function NotebookEditor() {
     );
   }, [cells]);
   const staleByCell = useMemo(() => cells.map((_, i) => isStale(cells, i)), [cells]);
+  // Editor type contexts: the `inputs` each code cell would receive right
+  // now (same rule as cellInputs, plus named cells that have not run yet so
+  // their names still complete). Identity is stable until an output or
+  // name above the cell changes, so editors are not churned by typing.
+  const contextByCell = useMemo(() => {
+    const cache = contextCache.current;
+    const out = cells.map((cell, i): TypeContext | undefined => {
+      if (cell.kind !== "code") return undefined;
+      const key: string[] = [];
+      for (let j = 0; j < i; j++) {
+        const c = cells[j];
+        if (c.kind === "markdown") continue;
+        key.push(`${c.id}|${c.kind}|${c.name ?? ""}|${c.output?.ok ? c.output.ran_at ?? c.output.fingerprint ?? "1" : ""}`);
+      }
+      return cache.get(cell.id, key.join("\n"), () => {
+        const inputs: TypeContext["inputs"] = [];
+        let prev: { value: unknown; source: string } | null = null;
+        for (let j = 0; j < i; j++) {
+          const c = cells[j];
+          if (c.kind === "markdown") continue;
+          const value = outputValue(c);
+          const label = `cell ${j + 1} · ${c.kind === "sql" ? "sql" : c.runtime ?? "python"}`;
+          const name = c.name?.trim();
+          if (name) inputs.push(value === undefined ? { name, source: `${label} · not run yet` } : { name, value, source: label });
+          if (value !== undefined) prev = { value, source: `${label}${name ? ` (${name})` : ""}` };
+        }
+        if (prev) inputs.push({ name: "prev", value: prev.value, source: `nearest output above · ${prev.source}` });
+        return { params: {}, paramsSource: "notebook cells run with empty params", inputs, inputsSource: "outputs of the cells above" };
+      });
+    });
+    cache.prune(cells.map((c) => c.id));
+    return out;
+  }, [cells]);
   const outline = useMemo(() => {
     const items: Array<{ id: string; text: string; level: number; kind: "h" | "cell" }> = [];
     for (const c of cells) {
@@ -376,13 +544,27 @@ export default function NotebookEditor() {
       </div>
       <div className="nb-head" style={{ marginBottom: 14 }}>
         <div className="meta">
-          <span className={`save-state${saveState === "dirty" ? " dirty" : ""}`}>
-            {saveState === "saved" ? `Saved · edited ${timeAgo(notebook.updated_at)}` : saveState === "saving" ? "Saving…" : saveState === "dirty" ? "Unsaved changes" : "Save failed"}
+          <span className={`save-state ${saveState}`} title={changed ? `Autosaved. “Discard changes” returns to ${checkpoint?.origin === "save" ? "the last explicit save" : "the document as you opened it"}.` : "Autosaved"}>
+            {saveState === "saved" ? `Saved · ${timeAgo(lastSavedAt ?? notebook.updated_at)}` : saveState === "saving" ? "Saving…" : saveState === "dirty" ? "Unsaved changes" : "Save failed"}
           </span>
           <span>{cells.length} cells</span>
           {counts.errors > 0 && <span style={{ color: "var(--critical)" }}>{counts.errors} error{counts.errors === 1 ? "" : "s"}</span>}
         </div>
         <div className="actions">
+          {changed && (
+            <button className="btn ghost" onClick={discardChanges} title={`Discard all changes since ${checkpoint?.origin === "save" ? "the last save" : "you opened this notebook"} (undoable)`}>
+              <ArrowCounterClockwise size={14} /> Discard changes
+            </button>
+          )}
+          <button
+            className={`btn${changed ? "" : " ghost"}`}
+            onClick={() => void saveNow()}
+            disabled={saveState === "saving" || (!changed && saveState === "saved")}
+            title={changed ? "Save now and make this the point “Discard changes” returns to (⌘S). Edits also autosave." : saveState === "error" ? "Retry the failed save (⌘S)" : "Everything is saved (⌘S)"}
+          >
+            <FloppyDisk size={14} /> {saveState === "error" ? "Retry save" : "Save"}
+          </button>
+          <span className="sep" />
           <label className="cb-check" title="Re-run cells that read from a cell when it runs">
             <input type="checkbox" checked={reactive} onChange={(e) => setReactive(e.target.checked)} />
             <Lightning size={13} /> Reactive
@@ -430,6 +612,7 @@ export default function NotebookEditor() {
                 stale={staleByCell[i]}
                 editing={editing.has(cell.id)}
                 deps={depsByCell[i]}
+                typeContext={contextByCell[i]}
                 connectors={connectors}
                 onPatch={(patch) => patchCell(cell.id, patch)}
                 onRun={() => runCell(cell.id)}
