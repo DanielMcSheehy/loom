@@ -120,9 +120,17 @@ docker compose up --build        # everything on http://localhost:7420
 1. **+ New Resource → Docker Compose**, point it at this repository.
 2. Set **Docker Compose Location** to `/docker-compose.coolify.yml`.
 3. Assign a domain on the resource (or let Coolify generate one) — the
-   `SERVICE_FQDN_LOOM_7420` magic variable routes Coolify's proxy to the
+   `SERVICE_FQDN_LOOM` magic variable routes Coolify's proxy to the
    server, SSE included. Data persists in the `loom-data` volume and the
    healthcheck drives status/rolling restarts.
+
+The image is built by GitHub Actions (`.github/workflows/image.yml`) and
+published to `ghcr.io/danielmcsheehy/rust-orchestrator` (public), so the
+Coolify host only pulls it — no Rust/polars compile on small servers. To
+redeploy right after each image build, set the repo secrets
+`COOLIFY_WEBHOOK` (the resource's Deploy Webhook URL) and `COOLIFY_TOKEN`
+(an API token with deploy permission), and turn off Coolify's own
+auto-deploy on push so it never pulls before the new image exists.
 
 The API has no authentication (trusted single-tenant): keep the resource
 internal, or front it with Coolify's access controls before exposing it.
