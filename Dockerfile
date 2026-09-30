@@ -23,18 +23,13 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# Copied BEFORE the pip install on purpose: BuildKit runs independent stages
-# in parallel, and the Rust stage (polars + thin LTO) needs several GB of RAM.
-# Depending on its output makes the pip step wait for it, so the two heavy
-# steps never overlap on small build hosts (Coolify builds died mid-pip with
-# exit 255 when they did).
-COPY --from=server /build/target/release/loom-server /usr/local/bin/loom-server
 # Scientific Python for task/function handlers. Debian's system Python is
 # externally managed (PEP 668), so packages live in a venv that workers use
 # via LOOM_PYTHON_BIN. Single-threaded BLAS/OpenMP: many workers run in
 # parallel, so per-worker thread pools would oversubscribe the CPUs.
 RUN python3 -m venv /opt/loom-py \
   && /opt/loom-py/bin/pip install --no-cache-dir numpy pandas scipy scikit-learn
+COPY --from=server /build/target/release/loom-server /usr/local/bin/loom-server
 COPY --from=console /build/dist /app/console/dist
 ENV LOOM_PORT=7420 \
     LOOM_DATA_DIR=/data \
