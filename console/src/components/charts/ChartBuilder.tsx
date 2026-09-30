@@ -41,12 +41,15 @@ export default function ChartBuilder({
   onChange,
   columns,
   height = 300,
+  controls = true,
 }: {
   rows: Row[];
   spec: ChartSpec;
   onChange: (s: ChartSpec) => void;
   columns?: ColumnInfo[];
   height?: number;
+  /** Show the mark / axis / color panel beside the chart. */
+  controls?: boolean;
 }) {
   const cols = useMemo(() => columns ?? inferColumns(rows), [columns, rows]);
   const numeric = cols.filter((c) => c.type === "number");
@@ -76,8 +79,8 @@ export default function ChartBuilder({
   }, [rows, spec, cols]);
 
   return (
-    <div className="chart-builder">
-      <div className="cb-side">
+    <div className={controls ? "chart-builder" : "chart-builder no-controls"}>
+      {controls && (<div className="cb-side">
         <div className="cb-field">
           <span>Mark</span>
           <div className="mark-grid">
@@ -300,7 +303,7 @@ export default function ChartBuilder({
             <ColorPicker entries={colorEntries} colors={spec.colors} onChange={(colors) => set({ colors })} />
           </div>
         )}
-      </div>
+      </div>)}
       <div className="cb-main">
         <Chart rows={rows} spec={spec} height={height} columns={cols} />
       </div>

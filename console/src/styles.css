@@ -504,6 +504,7 @@ details.task-detail[open] summary .task-row { background: var(--surface-2); }
 .chart-builder { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 0; border-top: 1px solid var(--border); }
 .chart-builder .cb-side { border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 10px; background: var(--surface-2); }
 .chart-builder .cb-main { padding: 14px 16px 12px; min-width: 0; }
+.chart-builder.no-controls { grid-template-columns: minmax(0, 1fr); }
 .cb-field { display: flex; flex-direction: column; gap: 4px; }
 .cb-field > span { font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
 .cb-field select, .cb-field input { height: 28px; font-size: 12.5px; }

@@ -1,6 +1,6 @@
 // Shared renderer for query / execution results: tabular data gets the data
 // grid + chart builder; everything else a JSON tree or a scalar readout.
-import { ChartBar, Code, Table } from "@phosphor-icons/react";
+import { ChartBar, Code, SlidersHorizontal, Table } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import type { ChartConfig } from "../types";
 import ChartBuilder, { defaultSpec } from "./charts/ChartBuilder";
@@ -62,6 +62,9 @@ export default function ResultView({
   const cols = useMemo(() => (rows ? inferColumns(rows) : []), [rows]);
   const [localView, setLocalView] = useState<ResultTab>(chart ? "chart" : "table");
   const [localChart, setLocalChart] = useState<ChartConfig | null>(migrateChart(chart));
+  // Chart controls start hidden when a page opens on a chart; picking the
+  // Chart tab opens them. Not persisted.
+  const [showControls, setShowControls] = useState(false);
   const active = view ?? localView;
   const spec = onChart ? migrateChart(chart) : localChart;
   const setView = (v: ResultTab) => {
@@ -94,6 +97,7 @@ export default function ResultView({
             title={numericCount === 0 ? "No numeric columns to chart" : "Chart"}
             onClick={() => {
               if (!spec) setChart(defaultSpec(rows, cols));
+              if (active !== "chart") setShowControls(true);
               setView("chart");
             }}
           >
@@ -104,12 +108,22 @@ export default function ResultView({
           </button>
         </div>
         <span className="grow" />
+        {active === "chart" && spec && (
+          <button
+            className={showControls ? "btn sm" : "btn sm ghost"}
+            onClick={() => setShowControls((s) => !s)}
+            title={showControls ? "Hide chart controls" : "Show chart controls"}
+            aria-pressed={showControls}
+          >
+            <SlidersHorizontal size={13} /> {showControls ? "Hide controls" : "Controls"}
+          </button>
+        )}
         <span>
           {rows.length.toLocaleString()} rows · {cols.length} cols
         </span>
       </div>
       {active === "table" && <DataGrid rows={rows} columns={cols} filename={filename} maxHeight={maxHeight} />}
-      {active === "chart" && (spec ? <ChartBuilder rows={rows} spec={spec} columns={cols} onChange={setChart} /> : <div className="chart-empty">No numeric columns to plot.</div>)}
+      {active === "chart" && (spec ? <ChartBuilder rows={rows} spec={spec} columns={cols} onChange={setChart} controls={showControls} /> : <div className="chart-empty">No numeric columns to plot.</div>)}
       {active === "json" && (
         <div style={{ padding: 8 }}>
           <JsonView value={rows.length > 200 ? rows.slice(0, 200) : rows} />
