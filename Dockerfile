@@ -20,14 +20,24 @@ RUN cargo build --release -p loom-server
 # ── runtime: rust binary + python + node workers ─────────────────────────
 FROM node:22-bookworm-slim
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 ca-certificates curl \
+  && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
+# Scientific Python for task/function handlers. Debian's system Python is
+# externally managed (PEP 668), so packages live in a venv that workers use
+# via LOOM_PYTHON_BIN. Single-threaded BLAS/OpenMP: many workers run in
+# parallel, so per-worker thread pools would oversubscribe the CPUs.
+RUN python3 -m venv /opt/loom-py \
+  && /opt/loom-py/bin/pip install --no-cache-dir numpy pandas scipy scikit-learn
 WORKDIR /app
 COPY --from=server /build/target/release/loom-server /usr/local/bin/loom-server
 COPY --from=console /build/dist /app/console/dist
 ENV LOOM_PORT=7420 \
     LOOM_DATA_DIR=/data \
-    LOOM_CONSOLE_DIST=/app/console/dist
+    LOOM_CONSOLE_DIST=/app/console/dist \
+    LOOM_PYTHON_BIN=/opt/loom-py/bin/python3 \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
 VOLUME /data
 EXPOSE 7420
 CMD ["loom-server"]

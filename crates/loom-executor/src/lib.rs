@@ -486,6 +486,31 @@ def handler(params, inputs):
     }
 
     #[tokio::test]
+    async fn python_non_json_results_are_lowered() {
+        // NaN/Infinity would otherwise produce invalid JSON on the wire; tuples,
+        // sets, and objects with `tolist`/`isoformat` (numpy, pandas) must not
+        // fail serialization.
+        let exec = Executor::new().unwrap();
+        let code = r#"
+import datetime
+class Arr:
+    def tolist(self):
+        return [1, 2]
+def handler(params, inputs):
+    return {"nan": float("nan"), "inf": [1.5, float("-inf")], "t": (1, 2),
+            "s": {3}, "arr": Arr(), "d": datetime.date(2026, 9, 30)}
+"#;
+        let out = exec
+            .execute(req(Runtime::Python, code), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            out.value,
+            json!({"nan": null, "inf": [1.5, null], "t": [1, 2], "s": [3], "arr": [1, 2], "d": "2026-09-30"})
+        );
+    }
+
+    #[tokio::test]
     async fn javascript_workload_runs() {
         let exec = Executor::new().unwrap();
         let code = r#"

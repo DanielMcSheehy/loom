@@ -15,6 +15,7 @@ The loop then waits for the next job, so a warm worker can serve many tasks
 import importlib.util
 import io
 import json
+import math
 import os
 import sys
 import traceback
@@ -27,6 +28,44 @@ REAL_STDOUT = sys.stdout
 
 def emit(obj):
     REAL_STDOUT.write(json.dumps(obj) + "\n")
+    REAL_STDOUT.flush()
+
+
+def _default(o):
+    """Lower common scientific types (numpy, pandas) to plain JSON values."""
+    to_dict = getattr(o, "to_dict", None)
+    if callable(to_dict) and hasattr(o, "columns"):  # pandas DataFrame → rows
+        return to_dict(orient="records")
+    for attr in ("tolist", "item"):  # numpy arrays/scalars, pandas Series/Index
+        fn = getattr(o, attr, None)
+        if callable(fn):
+            return fn()
+    isoformat = getattr(o, "isoformat", None)  # datetime/date/Timestamp
+    if callable(isoformat):
+        return isoformat()
+    if isinstance(o, (set, frozenset, tuple)):
+        return list(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
+def _finite(v):
+    """NaN/±Infinity are not JSON; they become null."""
+    if isinstance(v, float):
+        return v if math.isfinite(v) else None
+    if isinstance(v, dict):
+        return {k: _finite(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_finite(x) for x in v]
+    return v
+
+
+def emit_result(value):
+    try:
+        line = json.dumps({"type": "result", "value": value}, default=_default, allow_nan=False)
+    except ValueError:  # non-finite float somewhere: round-trip once, then scrub
+        plain = json.loads(json.dumps(value, default=_default))
+        line = json.dumps({"type": "result", "value": _finite(plain)}, allow_nan=False)
+    REAL_STDOUT.write(line + "\n")
     REAL_STDOUT.flush()
 
 
@@ -63,7 +102,7 @@ def run_job(req):
             raise RuntimeError("job must define `def handler(params, inputs)`")
         result = handler(req.get("params") or {}, req.get("inputs") or {})
         log_stream.flush()
-        emit({"type": "result", "value": result})
+        emit_result(result)
     except Exception as exc:  # noqa: BLE001 - report everything to the orchestrator
         log_stream.flush()
         emit({"type": "error", "message": str(exc), "trace": traceback.format_exc()})

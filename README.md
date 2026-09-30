@@ -250,6 +250,12 @@ Configuration (env vars): `LOOM_PORT` (7420), `LOOM_DATA_DIR` (`./data`),
 `LOOM_CONSOLE_DIST` (`./console/dist`), `LOOM_PYTHON_BIN` (`python3`),
 `LOOM_NODE_BIN` (`node`), `RUST_LOG` (`info`).
 
+The Docker image ships a Python venv with **numpy, pandas, scipy, and scikit-learn**
+(`LOOM_PYTHON_BIN=/opt/loom-py/bin/python3`, BLAS/OpenMP pinned to one thread per worker).
+Outside Docker, point `LOOM_PYTHON_BIN` at any venv to give handlers its packages.
+Handlers may return numpy/pandas values directly — arrays and Series become lists,
+DataFrames become row objects, and `NaN`/`±Infinity` become `null`.
+
 ## Performance
 
 Measured on a modest dev container (release build, SQLite store, real Python
