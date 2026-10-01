@@ -220,12 +220,15 @@ export function Confirm({
   title,
   body,
   confirmLabel = "Delete",
+  tone = "danger",
   onConfirm,
   onCancel,
 }: {
   title: string;
   body?: ReactNode;
   confirmLabel?: string;
+  /** `danger` for destructive actions (default); `primary` otherwise. */
+  tone?: "danger" | "primary";
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -245,7 +248,7 @@ export function Confirm({
           <button className="btn" onClick={onCancel} autoFocus>
             Cancel
           </button>
-          <button className="btn danger" onClick={onConfirm}>
+          <button className={`btn ${tone}`} onClick={onConfirm}>
             {confirmLabel}
           </button>
         </div>
@@ -255,16 +258,20 @@ export function Confirm({
 }
 
 /** Simple async confirm hook: `const [confirm, dialog] = useConfirm(); await confirm({...})`. */
-export function useConfirm(): [
-  (opts: { title: string; body?: ReactNode; confirmLabel?: string }) => Promise<boolean>,
-  ReactNode,
-] {
+export interface ConfirmOptions {
+  title: string;
+  body?: ReactNode;
+  confirmLabel?: string;
+  tone?: "danger" | "primary";
+}
+
+export function useConfirm(): [(opts: ConfirmOptions) => Promise<boolean>, ReactNode] {
   const [state, setState] = useState<{
-    opts: { title: string; body?: ReactNode; confirmLabel?: string };
+    opts: ConfirmOptions;
     resolve: (v: boolean) => void;
   } | null>(null);
   const confirm = useCallback(
-    (opts: { title: string; body?: ReactNode; confirmLabel?: string }) =>
+    (opts: ConfirmOptions) =>
       new Promise<boolean>((resolve) => setState({ opts, resolve })),
     [],
   );

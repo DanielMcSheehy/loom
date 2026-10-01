@@ -44,6 +44,11 @@ and the tests.
   Python bindings bypass HTTP proxies (`ProxyHandler({})`) — local API calls
   must never route through a corporate proxy. Keep both bindings' surfaces
   identical.
+- Auth: when the server has `LOOM_PASSWORD`, `main.rs` exports it as
+  `LOOM_API_TOKEN` before the executor exists. Process workers inherit it;
+  `plan()` forwards it into sandboxes with a name-only `-e LOOM_API_TOKEN`
+  (never by value — argv is visible in process listings). Both bindings send
+  it as `Authorization: Bearer`. Never print it or put it in results/errors.
 - Python: each job loads as a fresh module via `spec_from_file_location`;
   stdout is redirected per-job into log events (`REAL_STDOUT` carries the
   protocol). Node: `console.*` is rewired to log events; jobs import via

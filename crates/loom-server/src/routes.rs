@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
@@ -21,15 +21,34 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
+use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
+use crate::auth;
 use crate::error::{ApiError, ApiResult};
 use crate::orchestrator::{cancel_run, launch_run, merge_params, CancelOutcome};
 use crate::state::SharedState;
 
-pub fn api_router() -> Router<SharedState> {
+/// The whole HTTP surface minus the static console: `/api/*` + `/mcp`,
+/// behind the auth guard (a no-op unless a password is configured).
+pub fn app(state: SharedState) -> Router {
+    Router::new()
+        .nest("/api", api_router())
+        .route("/mcp", post(crate::mcp::handle))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::guard,
+        ))
+        .layer(CorsLayer::permissive())
+        .with_state(state)
+}
+
+fn api_router() -> Router<SharedState> {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/auth/status", get(auth::status))
+        .route("/auth/login", post(auth::login))
+        .route("/auth/logout", post(auth::logout))
         .route("/stats", get(stats))
         .route("/events", get(all_events))
         .route("/workflows", get(list_workflows).post(create_workflow))
@@ -71,6 +90,8 @@ pub fn api_router() -> Router<SharedState> {
                 .put(update_notebook)
                 .delete(delete_notebook),
         )
+        .route("/notebooks/{id}/publish", post(publish_notebook))
+        .route("/notebooks/{id}/unpublish", post(unpublish_notebook))
 }
 
 async fn healthz() -> Json<Value> {
@@ -634,8 +655,17 @@ async fn delete_connector(
 
 // ── notebooks ────────────────────────────────────────────────────────────
 
-async fn list_notebooks(State(state): State<SharedState>) -> ApiResult<Json<Vec<Notebook>>> {
-    Ok(Json(state.store.list_notebooks()?))
+/// `?public=1` narrows the list to published notebooks — the only form an
+/// anonymous caller may use when auth is enabled.
+async fn list_notebooks(
+    State(state): State<SharedState>,
+    uri: Uri,
+) -> ApiResult<Json<Vec<Notebook>>> {
+    let mut notebooks = state.store.list_notebooks()?;
+    if auth::public_only(&uri) {
+        notebooks.retain(|nb| nb.public);
+    }
+    Ok(Json(notebooks))
 }
 
 #[derive(Deserialize)]
@@ -643,6 +673,9 @@ struct NotebookBody {
     name: String,
     #[serde(default)]
     cells: Value,
+    /// Omitted ⇒ private on create, unchanged on update.
+    #[serde(default)]
+    public: Option<bool>,
 }
 
 async fn create_notebook(
@@ -654,6 +687,7 @@ async fn create_notebook(
         id: Uuid::new_v4(),
         name: body.name,
         cells: body.cells,
+        public: body.public.unwrap_or(false),
         created_at: now,
         updated_at: now,
     };
@@ -676,8 +710,38 @@ async fn update_notebook(
     let mut nb = state.store.get_notebook(id)?;
     nb.name = body.name;
     nb.cells = body.cells;
+    if let Some(public) = body.public {
+        nb.public = public;
+    }
     nb.updated_at = Utc::now();
     state.store.put_notebook(&nb)?;
+    Ok(Json(nb))
+}
+
+/// Publish: the notebook and its stored outputs become readable without
+/// authentication (see `auth::guard`). Reading is all it grants — execution
+/// routes stay protected.
+async fn publish_notebook(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Notebook>> {
+    set_notebook_public(&state, id, true)
+}
+
+async fn unpublish_notebook(
+    State(state): State<SharedState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<Notebook>> {
+    set_notebook_public(&state, id, false)
+}
+
+/// Visibility is not content: `updated_at` is left alone.
+fn set_notebook_public(state: &SharedState, id: Uuid, public: bool) -> ApiResult<Json<Notebook>> {
+    let mut nb = state.store.get_notebook(id)?;
+    if nb.public != public {
+        nb.public = public;
+        state.store.put_notebook(&nb)?;
+    }
     Ok(Json(nb))
 }
 
@@ -771,4 +835,549 @@ async fn ingest(
         "ingested": { "records": records, "bytes": bytes },
         "triggered_runs": triggered,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use axum::http::header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE};
+    use axum::http::{HeaderMap, Method, Request};
+    use loom_executor::Executor;
+    use loom_store::Store;
+    use tower::ServiceExt;
+
+    const PASSWORD: &str = "hunter2";
+
+    /// A router over fresh in-memory state; `password: None` = auth disabled.
+    fn test_app(password: Option<&str>) -> (Router, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::with_password(
+            Store::open_in_memory().unwrap(),
+            Executor::new().unwrap(),
+            dir.path().to_path_buf(),
+            password.map(String::from),
+        );
+        (app(state), dir)
+    }
+
+    /// Who is asking.
+    #[derive(Clone, Copy)]
+    enum As<'a> {
+        Anonymous,
+        Bearer(&'a str),
+        Cookie(&'a str),
+    }
+
+    async fn call(
+        app: &Router,
+        who: As<'_>,
+        method: Method,
+        uri: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, HeaderMap, Value) {
+        let mut req = Request::builder().method(method).uri(uri);
+        req = match who {
+            As::Anonymous => req,
+            As::Bearer(token) => req.header(AUTHORIZATION, format!("Bearer {token}")),
+            As::Cookie(cookie) => req.header(COOKIE, cookie),
+        };
+        let body = match body {
+            Some(json) => {
+                req = req.header(CONTENT_TYPE, "application/json");
+                Body::from(json.to_string())
+            }
+            None => Body::empty(),
+        };
+        let resp = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+        let (status, headers) = (resp.status(), resp.headers().clone());
+        // SSE bodies never end; only JSON bodies are read.
+        let is_json = headers
+            .get(CONTENT_TYPE)
+            .is_some_and(|v| v.as_bytes().starts_with(b"application/json"));
+        let json = if is_json {
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+        (status, headers, json)
+    }
+
+    async fn status_of(app: &Router, who: As<'_>, method: Method, uri: &str) -> StatusCode {
+        call(app, who, method, uri, None).await.0
+    }
+
+    /// Log in and return the `loom_session=<token>` cookie pair.
+    async fn login(app: &Router) -> String {
+        let (status, headers, body) = call(
+            app,
+            As::Anonymous,
+            Method::POST,
+            "/api/auth/login",
+            Some(json!({ "password": PASSWORD })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, json!({ "ok": true }));
+        let set_cookie = headers[SET_COOKIE].to_str().unwrap();
+        set_cookie.split(';').next().unwrap().to_string()
+    }
+
+    async fn create_notebook_as(app: &Router, who: As<'_>, name: &str) -> String {
+        let cells = json!([{
+            "id": "c1", "kind": "sql", "code": "SELECT 1 AS n",
+            "output": { "ok": true, "rows": [{ "n": 1 }] },
+        }]);
+        let (status, _, nb) = call(
+            app,
+            who,
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({ "name": name, "cells": cells })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(nb["public"], json!(false), "notebooks start private");
+        nb["id"].as_str().unwrap().to_string()
+    }
+
+    const EXECUTE: &str = "def handler(params, inputs):\n    return 41 + 1\n";
+
+    #[tokio::test]
+    async fn auth_disabled_leaves_everything_open() {
+        let (app, _dir) = test_app(None);
+        let anon = As::Anonymous;
+        for uri in [
+            "/api/healthz",
+            "/api/stats",
+            "/api/workflows",
+            "/api/runs",
+            "/api/datasets",
+        ] {
+            assert_eq!(
+                status_of(&app, anon, Method::GET, uri).await,
+                StatusCode::OK,
+                "{uri}"
+            );
+        }
+        let (_, _, status) = call(&app, anon, Method::GET, "/api/auth/status", None).await;
+        assert_eq!(status, json!({ "enabled": false, "authenticated": true }));
+
+        // Private notebooks, execution and MCP all work with no credential.
+        let id = create_notebook_as(&app, anon, "open").await;
+        let (code, _, nb) = call(
+            &app,
+            anon,
+            Method::GET,
+            &format!("/api/notebooks/{id}"),
+            None,
+        )
+        .await;
+        assert_eq!((code, &nb["name"]), (StatusCode::OK, &json!("open")));
+        let (code, _, out) = call(
+            &app,
+            anon,
+            Method::POST,
+            "/api/execute",
+            Some(json!({ "runtime": "python", "code": EXECUTE })),
+        )
+        .await;
+        assert_eq!((code, &out["result"]), (StatusCode::OK, &json!(42)));
+        let (code, _, _) = call(
+            &app,
+            anon,
+            Method::POST,
+            "/mcp",
+            Some(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        // An empty password is the same as none.
+        let (app, _dir) = test_app(Some(""));
+        assert_eq!(
+            status_of(&app, anon, Method::GET, "/api/stats").await,
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn password_set_rejects_requests_without_a_credential() {
+        let (app, _dir) = test_app(Some(PASSWORD));
+        let anon = As::Anonymous;
+        let (code, headers, body) = call(&app, anon, Method::GET, "/api/stats", None).await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            body,
+            json!({ "error": "unauthorized" }),
+            "API error shape kept"
+        );
+        assert_eq!(headers["www-authenticate"], "Bearer");
+
+        for (method, uri) in [
+            (Method::GET, "/api/workflows"),
+            (Method::GET, "/api/runs"),
+            (Method::GET, "/api/datasets"),
+            (Method::GET, "/api/notebooks"),
+            (Method::GET, "/api/events"),
+            (Method::POST, "/api/query"),
+            (Method::POST, "/api/execute"),
+            (Method::POST, "/api/ingest/readings"),
+            (Method::POST, "/mcp"),
+            (Method::GET, "/api/no-such-route"),
+        ] {
+            assert_eq!(
+                status_of(&app, anon, method.clone(), uri).await,
+                StatusCode::UNAUTHORIZED,
+                "{method} {uri}"
+            );
+        }
+        assert_eq!(
+            status_of(&app, As::Bearer("wrong"), Method::GET, "/api/stats").await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status_of(
+                &app,
+                As::Cookie("loom_session=forged"),
+                Method::GET,
+                "/api/stats"
+            )
+            .await,
+            StatusCode::UNAUTHORIZED
+        );
+
+        // Always open: health and the auth endpoints themselves.
+        assert_eq!(
+            status_of(&app, anon, Method::GET, "/api/healthz").await,
+            StatusCode::OK
+        );
+        let (code, _, status) = call(&app, anon, Method::GET, "/api/auth/status", None).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(status, json!({ "enabled": true, "authenticated": false }));
+    }
+
+    #[tokio::test]
+    async fn bearer_password_grants_access() {
+        let (app, _dir) = test_app(Some(PASSWORD));
+        let me = As::Bearer(PASSWORD);
+        assert_eq!(
+            status_of(&app, me, Method::GET, "/api/stats").await,
+            StatusCode::OK
+        );
+        let (code, _, out) = call(
+            &app,
+            me,
+            Method::POST,
+            "/api/execute",
+            Some(json!({ "runtime": "python", "code": EXECUTE })),
+        )
+        .await;
+        assert_eq!((code, &out["result"]), (StatusCode::OK, &json!(42)));
+        let (code, _, tools) = call(
+            &app,
+            me,
+            Method::POST,
+            "/mcp",
+            Some(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(tools["result"]["tools"].is_array());
+        let (_, _, status) = call(&app, me, Method::GET, "/api/auth/status", None).await;
+        assert_eq!(status, json!({ "enabled": true, "authenticated": true }));
+    }
+
+    #[tokio::test]
+    async fn login_sets_a_session_cookie_that_authenticates() {
+        let (app, _dir) = test_app(Some(PASSWORD));
+        let (_, headers, _) = call(
+            &app,
+            As::Anonymous,
+            Method::POST,
+            "/api/auth/login",
+            Some(json!({ "password": PASSWORD })),
+        )
+        .await;
+        let set_cookie = headers[SET_COOKIE].to_str().unwrap();
+        assert!(set_cookie.starts_with("loom_session="));
+        assert!(set_cookie.contains("HttpOnly") && set_cookie.contains("SameSite=Lax"));
+        assert!(
+            !set_cookie.contains("Secure"),
+            "plain http request: {set_cookie}"
+        );
+        assert!(!set_cookie.contains(PASSWORD), "cookie is an opaque token");
+
+        let cookie = login(&app).await;
+        let me = As::Cookie(&cookie);
+        assert_eq!(
+            status_of(&app, me, Method::GET, "/api/stats").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_of(&app, me, Method::GET, "/api/events").await,
+            StatusCode::OK
+        );
+        let (_, _, status) = call(&app, me, Method::GET, "/api/auth/status", None).await;
+        assert_eq!(status["authenticated"], json!(true));
+
+        // Logout revokes the token server-side, not just in the browser.
+        let (code, headers, _) = call(&app, me, Method::POST, "/api/auth/logout", None).await;
+        assert_eq!(code, StatusCode::OK);
+        assert!(headers[SET_COOKIE].to_str().unwrap().contains("Max-Age=0"));
+        assert_eq!(
+            status_of(&app, me, Method::GET, "/api/stats").await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn session_cookie_is_secure_behind_https() {
+        let (app, _dir) = test_app(Some(PASSWORD));
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/auth/login")
+            .header(CONTENT_TYPE, "application/json")
+            .header("x-forwarded-proto", "https")
+            .body(Body::from(json!({ "password": PASSWORD }).to_string()))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert!(resp.headers()[SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .contains("; Secure"));
+    }
+
+    #[tokio::test]
+    async fn wrong_password_is_rejected_and_rate_limited() {
+        let (app, _dir) = test_app(Some(PASSWORD));
+        let attempt = |password: &'static str| {
+            let app = app.clone();
+            async move {
+                call(
+                    &app,
+                    As::Anonymous,
+                    Method::POST,
+                    "/api/auth/login",
+                    Some(json!({ "password": password })),
+                )
+                .await
+            }
+        };
+        let (code, headers, body) = attempt("nope").await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED);
+        assert_eq!(body, json!({ "error": "invalid password" }));
+        assert!(headers.get(SET_COOKIE).is_none());
+
+        // Burn the rest of the burst; then even the right password waits.
+        let mut last = code;
+        for _ in 0..8 {
+            last = attempt("nope").await.0;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+        let (code, headers, body) = attempt(PASSWORD).await;
+        assert_eq!(code, StatusCode::TOO_MANY_REQUESTS);
+        assert!(headers.contains_key("retry-after"));
+        assert!(body["error"]
+            .as_str()
+            .unwrap()
+            .contains("too many login attempts"));
+    }
+
+    #[tokio::test]
+    async fn query_token_works_only_on_sse_routes() {
+        let (app, _dir) = test_app(Some(PASSWORD));
+        let anon = As::Anonymous;
+        let run = Uuid::new_v4();
+        for uri in [
+            format!("/api/events?token={PASSWORD}"),
+            format!("/api/runs/{run}/events?token={PASSWORD}"),
+        ] {
+            assert_eq!(
+                status_of(&app, anon, Method::GET, &uri).await,
+                StatusCode::OK,
+                "{uri}"
+            );
+        }
+        for uri in [
+            "/api/events?token=wrong".to_string(),
+            format!("/api/stats?token={PASSWORD}"),
+            format!("/api/runs/{run}?token={PASSWORD}"),
+        ] {
+            assert_eq!(
+                status_of(&app, anon, Method::GET, &uri).await,
+                StatusCode::UNAUTHORIZED,
+                "{uri}"
+            );
+        }
+        assert_eq!(
+            status_of(
+                &app,
+                anon,
+                Method::POST,
+                &format!("/api/execute?token={PASSWORD}")
+            )
+            .await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn published_notebook_is_readable_anonymously_but_nothing_else_is() {
+        let (app, _dir) = test_app(Some(PASSWORD));
+        let (me, anon) = (As::Bearer(PASSWORD), As::Anonymous);
+        let public_id = create_notebook_as(&app, me, "report").await;
+        let private_id = create_notebook_as(&app, me, "scratch").await;
+        let public_uri = format!("/api/notebooks/{public_id}");
+        let private_uri = format!("/api/notebooks/{private_id}");
+
+        // Before publishing, neither is visible.
+        assert_eq!(
+            status_of(&app, anon, Method::GET, &public_uri).await,
+            StatusCode::UNAUTHORIZED
+        );
+
+        // Publishing itself needs auth.
+        let publish = format!("{public_uri}/publish");
+        assert_eq!(
+            status_of(&app, anon, Method::POST, &publish).await,
+            StatusCode::UNAUTHORIZED
+        );
+        let (code, _, nb) = call(&app, me, Method::POST, &publish, None).await;
+        assert_eq!((code, &nb["public"]), (StatusCode::OK, &json!(true)));
+
+        // Anonymous read: the notebook with its stored outputs.
+        let (code, _, nb) = call(&app, anon, Method::GET, &public_uri, None).await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(nb["name"], json!("report"));
+        assert_eq!(nb["cells"][0]["output"]["rows"], json!([{ "n": 1 }]));
+
+        // Private and nonexistent notebooks look the same: 401, never 404.
+        let missing = format!("/api/notebooks/{}", Uuid::new_v4());
+        for uri in [
+            private_uri.as_str(),
+            missing.as_str(),
+            "/api/notebooks/not-a-uuid",
+        ] {
+            assert_eq!(
+                status_of(&app, anon, Method::GET, uri).await,
+                StatusCode::UNAUTHORIZED,
+                "{uri}"
+            );
+        }
+
+        // The public list shows published notebooks only; the full list is protected.
+        let (code, _, list) = call(&app, anon, Method::GET, "/api/notebooks?public=1", None).await;
+        assert_eq!(code, StatusCode::OK);
+        let names: Vec<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["report"]);
+        assert_eq!(
+            status_of(&app, anon, Method::GET, "/api/notebooks").await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status_of(&app, anon, Method::GET, "/api/notebooks?public=0").await,
+            StatusCode::UNAUTHORIZED
+        );
+        let (_, _, all) = call(&app, me, Method::GET, "/api/notebooks", None).await;
+        assert_eq!(all.as_array().unwrap().len(), 2);
+
+        // A visitor can read, never write or execute — even with a public notebook around.
+        for (method, uri) in [
+            (Method::PUT, public_uri.as_str()),
+            (Method::DELETE, public_uri.as_str()),
+            (Method::POST, &format!("{public_uri}/unpublish")),
+            (Method::POST, "/api/notebooks"),
+            (Method::POST, "/api/execute"),
+            (Method::POST, "/api/query"),
+            (Method::GET, "/api/datasets"),
+            (Method::GET, "/api/connectors"),
+        ] {
+            let body =
+                json!({ "name": "x", "runtime": "python", "code": EXECUTE, "sql": "SELECT 1" });
+            let (code, _, err) = call(&app, anon, method.clone(), uri, Some(body)).await;
+            assert_eq!(code, StatusCode::UNAUTHORIZED, "{method} {uri}");
+            assert_eq!(err, json!({ "error": "unauthorized" }));
+        }
+        let (_, _, still) = call(&app, me, Method::GET, &public_uri, None).await;
+        assert_eq!(
+            still["name"],
+            json!("report"),
+            "anonymous PUT/DELETE changed nothing"
+        );
+
+        // Unpublish closes it again.
+        let (code, _, nb) = call(
+            &app,
+            me,
+            Method::POST,
+            &format!("{public_uri}/unpublish"),
+            None,
+        )
+        .await;
+        assert_eq!((code, &nb["public"]), (StatusCode::OK, &json!(false)));
+        assert_eq!(
+            status_of(&app, anon, Method::GET, &public_uri).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn update_preserves_public_unless_told_otherwise() {
+        let (app, _dir) = test_app(None);
+        let anon = As::Anonymous;
+        let id = create_notebook_as(&app, anon, "nb").await;
+        let uri = format!("/api/notebooks/{id}");
+        call(&app, anon, Method::POST, &format!("{uri}/publish"), None).await;
+
+        // The console autosaves {name, cells}; that must not unpublish.
+        let (_, _, nb) = call(
+            &app,
+            anon,
+            Method::PUT,
+            &uri,
+            Some(json!({ "name": "renamed", "cells": [] })),
+        )
+        .await;
+        assert_eq!(
+            (&nb["name"], &nb["public"]),
+            (&json!("renamed"), &json!(true))
+        );
+        let (_, _, nb) = call(
+            &app,
+            anon,
+            Method::PUT,
+            &uri,
+            Some(json!({ "name": "renamed", "cells": [], "public": false })),
+        )
+        .await;
+        assert_eq!(nb["public"], json!(false));
+        assert_eq!(
+            status_of(
+                &app,
+                anon,
+                Method::POST,
+                &format!("/api/notebooks/{}/publish", Uuid::new_v4())
+            )
+            .await,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[test]
+    fn notebooks_stored_before_publishing_existed_are_private() {
+        let old = json!({
+            "id": Uuid::new_v4(), "name": "old", "cells": [],
+            "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+        });
+        let nb: Notebook = serde_json::from_value(old).unwrap();
+        assert!(!nb.public);
+    }
 }

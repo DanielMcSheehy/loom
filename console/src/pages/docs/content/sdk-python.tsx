@@ -76,6 +76,9 @@ run = client.trigger(wf["id"], params={"n": 10}, wait=True)  # polls every 0.5 s
 print(run["state"], client.get_run(run["id"])["tasks"][-1]["result"])`}
     />
     <P>
+      For a server started with <C>LOOM_PASSWORD</C>, pass the password as <C>token</C> — <C>LoomClient(url, token="…")</C> — or export <C>LOOM_API_TOKEN</C>, which the client reads by default. It is sent as <C>Authorization: Bearer</C> on every request, event streams included; without it the server answers <C>401</C>.
+    </P>
+    <P>
       Every non-2xx response raises <C>LoomError(status, message)</C> with the server's <C>{`{"error"}`}</C> text; <C>e.status</C> holds the HTTP code. <C>trigger(wait=True)</C> raises <C>TimeoutError</C> if the run is not terminal within <C>timeout</C>.
     </P>
     <Table

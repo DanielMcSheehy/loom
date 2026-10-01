@@ -15,7 +15,7 @@ export default (
         ["Timestamps", "RFC 3339 UTC strings, e.g. 2026-09-30T10:00:00.120Z."],
         ["Execution results", <><C>invoke</C> and <C>execute</C> return <C>200</C> even when the user code fails; inspect <C>ok</C>.</>],
         ["CORS", "Permissive (any origin)."],
-        ["Authentication", <>None. See <DocLink to="/docs/security">Security</DocLink>.</>],
+        ["Authentication", <>None unless the server was started with <C>LOOM_PASSWORD</C>. When it is set, every <C>/api/*</C> route and <C>/mcp</C> needs <C>Authorization: Bearer &lt;password&gt;</C> (or the console's <C>loom_session</C> cookie; SSE routes also accept <C>?token=</C>) and otherwise answers <C>401 {`{"error": "unauthorized"}`}</C>. Open regardless: <C>/api/healthz</C>, <C>/api/auth/*</C>, and reads of published notebooks. See <Link to="#auth">Authentication</Link> and <DocLink to="/docs/security">Security</DocLink>.</>],
       ]}
     />
     <Code
@@ -51,7 +51,7 @@ content-type: application/json
     ))}
 
     <Callout kind="note" title="Examples assume">
-      <C>WF</C>, <C>RUN</C>, and <C>NB</C> shell variables holding ids from earlier responses, a server on <C>localhost:7420</C>, and — for the Python and TypeScript tabs — a constructed <C>client</C> as shown on the SDK pages.
+      <C>WF</C>, <C>RUN</C>, and <C>NB</C> shell variables holding ids from earlier responses, a server on <C>localhost:7420</C>, and — for the Python and TypeScript tabs — a constructed <C>client</C> as shown on the SDK pages. Against a server with <C>LOOM_PASSWORD</C>, add <C>-H "authorization: Bearer $LOOM_PASSWORD"</C> to each curl and pass <C>token</C> to the client.
     </Callout>
   </>
 );

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -20,9 +21,23 @@ class LoomError(RuntimeError):
 
 
 class LoomClient:
-    def __init__(self, base_url: str = "http://localhost:7420", timeout: float = 30.0):
+    """Client for one Loom server.
+
+    ``token`` is the server's ``LOOM_PASSWORD``, sent as
+    ``Authorization: Bearer <token>`` on every request (including event
+    streams). It defaults to the ``LOOM_API_TOKEN`` environment variable;
+    leave both unset for a server running without a password.
+    """
+
+    def __init__(
+        self,
+        base_url: str = "http://localhost:7420",
+        timeout: float = 30.0,
+        token: Optional[str] = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.token = token if token is not None else os.environ.get("LOOM_API_TOKEN")
 
     # ── plumbing ─────────────────────────────────────────────────────────
 
@@ -35,6 +50,8 @@ class LoomClient:
     ):
         data = None
         headers = {"accept": "application/json"}
+        if self.token:
+            headers["authorization"] = f"Bearer {self.token}"
         if isinstance(body, dict):
             data = json.dumps(body).encode()
             headers["content-type"] = "application/json"

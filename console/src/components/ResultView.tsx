@@ -48,6 +48,8 @@ export default function ResultView({
   onView,
   filename,
   maxHeight,
+  readOnly,
+  initialView,
 }: {
   value: unknown;
   chart?: ChartConfig | null;
@@ -57,10 +59,14 @@ export default function ResultView({
   onView?: (v: ResultTab) => void;
   filename?: string;
   maxHeight?: number;
+  /** Viewing only (published notebooks): tabs switch, the chart spec can't be edited. */
+  readOnly?: boolean;
+  /** Starting tab when uncontrolled (defaults to the chart if there is one). */
+  initialView?: ResultTab;
 }) {
   const rows = rowsOf(value);
   const cols = useMemo(() => (rows ? inferColumns(rows) : []), [rows]);
-  const [localView, setLocalView] = useState<ResultTab>(chart ? "chart" : "table");
+  const [localView, setLocalView] = useState<ResultTab>(initialView ?? (chart ? "chart" : "table"));
   const [localChart, setLocalChart] = useState<ChartConfig | null>(migrateChart(chart));
   // Chart controls start hidden when a page opens on a chart; picking the
   // Chart tab opens them. Not persisted.
@@ -97,7 +103,7 @@ export default function ResultView({
             title={numericCount === 0 ? "No numeric columns to chart" : "Chart"}
             onClick={() => {
               if (!spec) setChart(defaultSpec(rows, cols));
-              if (active !== "chart") setShowControls(true);
+              if (active !== "chart" && !readOnly) setShowControls(true);
               setView("chart");
             }}
           >
@@ -108,7 +114,7 @@ export default function ResultView({
           </button>
         </div>
         <span className="grow" />
-        {active === "chart" && spec && (
+        {active === "chart" && spec && !readOnly && (
           <button
             className={showControls ? "btn sm" : "btn sm ghost"}
             onClick={() => setShowControls((s) => !s)}
@@ -123,7 +129,7 @@ export default function ResultView({
         </span>
       </div>
       {active === "table" && <DataGrid rows={rows} columns={cols} filename={filename} maxHeight={maxHeight} />}
-      {active === "chart" && (spec ? <ChartBuilder rows={rows} spec={spec} columns={cols} onChange={setChart} controls={showControls} /> : <div className="chart-empty">No numeric columns to plot.</div>)}
+      {active === "chart" && (spec ? <ChartBuilder rows={rows} spec={spec} columns={cols} onChange={setChart} controls={showControls && !readOnly} /> : <div className="chart-empty">No numeric columns to plot.</div>)}
       {active === "json" && (
         <div style={{ padding: 8 }}>
           <JsonView value={rows.length > 200 ? rows.slice(0, 200) : rows} />

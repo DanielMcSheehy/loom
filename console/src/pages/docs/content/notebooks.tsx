@@ -133,9 +133,28 @@ export function handler(params: Params, inputs: Inputs) {
       ]}
     />
 
+    <H2 id="publishing">Publishing a notebook</H2>
+    <P>
+      <strong>Publish</strong> in the notebook header makes the notebook readable by anyone with its link, without logging in — useful for sharing a report from a server protected by <C>LOOM_PASSWORD</C>. The link is the notebook's normal address (<C>/notebooks/{"{id}"}</C>; <strong>Copy public link</strong> puts it on the clipboard). Published notebooks carry a <strong>Public</strong> badge in the header and in the notebook list.
+    </P>
+    <Ul>
+      <Li>
+        Visitors get a read-only page: rendered markdown, highlighted code, and each cell's <em>stored</em> output and chart, with the outline alongside. They can switch between Table, Chart, and JSON and sort or filter a result grid, but there is nothing to run, edit, or save.
+      </Li>
+      <Li>
+        Publishing never grants execution. Cells are not re-run for visitors; <C>/api/execute</C>, <C>/api/query</C>, and every write stay behind the password.
+      </Li>
+      <Li>
+        What visitors see is what was last saved, including outputs — check that no cell output shows data you would not share. Later edits and re-runs show up for visitors once saved. <strong>Unpublish</strong> closes the link immediately.
+      </Li>
+    </Ul>
+    <P>
+      Over the API: <DocLink to="/docs/api#post-api-notebooks-id-publish">POST /api/notebooks/{"{id}"}/publish</DocLink> and <C>/unpublish</C>. See <DocLink to="/docs/security#published">Security</DocLink> for exactly what is and is not exposed.
+    </P>
+
     <H2 id="api">Notebooks over the API</H2>
     <P>
-      The routes are plain CRUD: <C>GET/POST /api/notebooks</C>, <C>GET/PUT/DELETE /api/notebooks/{"{id}"}</C>. Cells are any JSON, but only the schema above renders in the console. The MCP <C>create_notebook</C> tool creates a document the same way.
+      The routes are plain CRUD: <C>GET/POST /api/notebooks</C>, <C>GET/PUT/DELETE /api/notebooks/{"{id}"}</C>, plus <C>POST …/publish</C> and <C>…/unpublish</C>. Cells are any JSON, but only the schema above renders in the console. The MCP <C>create_notebook</C> tool creates a document the same way.
     </P>
     <Examples
       examples={{

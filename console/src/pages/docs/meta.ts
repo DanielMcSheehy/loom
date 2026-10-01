@@ -30,7 +30,7 @@ export const DOC_PAGES: DocPageMeta[] = [
   { slug: "api", title: "REST API reference", summary: "Every HTTP route: method, path, request body, response shape, and a curl example.", section: "Reference", keywords: "http endpoints routes curl rest" },
   { slug: "configuration", title: "Configuration", summary: "All LOOM_* environment variables and their defaults.", section: "Reference", keywords: "env environment variables port data dir" },
   { slug: "isolation", title: "Isolation & worker pool", summary: "Process, container, and microVM tiers; how the warm pool reuses interpreters.", section: "Reference", keywords: "docker podman kata firecracker pool workers" },
-  { slug: "security", title: "Security", summary: "No authentication: Loom is a trusted single-tenant service by design.", section: "Reference", keywords: "auth authentication trust deploy expose" },
+  { slug: "security", title: "Security", summary: "No authentication unless LOOM_PASSWORD is set; what the password and published notebooks do and do not protect.", section: "Reference", keywords: "auth authentication password login bearer token cookie publish public trust deploy expose" },
 ];
 
 export const pageBySlug = (slug: string) => DOC_PAGES.find((p) => p.slug === slug);

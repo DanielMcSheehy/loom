@@ -15,7 +15,9 @@ import {
   DotsThree,
   DownloadSimple,
   FloppyDisk,
+  Globe,
   Lightning,
+  LinkSimple,
   Play,
   Trash,
 } from "@phosphor-icons/react";
@@ -23,6 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, download, timeAgo } from "../api";
 import { useCrumbs } from "../App";
+import { publicNotebookUrl, useAuth } from "../auth";
 import { headings } from "../components/Markdown";
 import Cell from "../components/notebook/Cell";
 import CellInserter from "../components/notebook/CellInserter";
@@ -55,6 +58,7 @@ export default function NotebookEditor() {
   const navigate = useNavigate();
   const toast = useToast();
   const [confirm, confirmDialog] = useConfirm();
+  const { enabled: authEnabled } = useAuth();
   const [notebook, setNotebook] = useState<Notebook | null>(null);
   const [cells, _setCells] = useState<NotebookCell[]>([]);
   const cellsRef = useRef<NotebookCell[]>([]);
@@ -455,6 +459,59 @@ export default function NotebookEditor() {
     navigate("/notebooks");
   };
 
+  // ── publishing ──────────────────────────────────────────────────────
+  // A published notebook is readable (cells + stored outputs) by anyone with
+  // the link; execution and editing stay behind the login. The server owns
+  // the flag — autosave's PUT {name, cells} leaves it untouched.
+  const copyPublicLink = async () => {
+    const url = publicNotebookUrl(id!);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Public link copied");
+    } catch {
+      // Clipboard needs a secure context; show the link instead.
+      toast(url);
+    }
+  };
+
+  const publish = async () => {
+    const ok = await confirm({
+      title: `Publish “${nameRef.current || "Untitled"}”?`,
+      body: (
+        <>
+          Anyone with the link can read this notebook and its stored outputs — code, results, and charts — without logging in. They can never run or edit it.
+          {!authEnabled && (
+            <>
+              <br />
+              <br />
+              This server has no password (<code>LOOM_PASSWORD</code>), so everything on it is already open to anyone who can reach it.
+            </>
+          )}
+        </>
+      ),
+      confirmLabel: "Publish",
+      tone: "primary",
+    });
+    if (!ok) return;
+    // Visitors see what is stored: flush pending edits first.
+    if (saveStateRef.current !== "saved" && !(await persist())) return;
+    try {
+      setNotebook(await api.post<Notebook>(`/api/notebooks/${id}/publish`));
+      toast("Notebook published", { action: { label: "Copy link", onClick: () => void copyPublicLink() } });
+    } catch (e) {
+      toast(`Publish failed: ${(e as Error).message}`, "error");
+    }
+  };
+
+  const unpublish = async () => {
+    try {
+      setNotebook(await api.post<Notebook>(`/api/notebooks/${id}/unpublish`));
+      toast("Notebook unpublished — the link now requires a login");
+    } catch (e) {
+      toast(`Unpublish failed: ${(e as Error).message}`, "error");
+    }
+  };
+
   // ── derived ─────────────────────────────────────────────────────────
   const depsByCell = useMemo(() => {
     const byId = new Map(cells.map((c) => [c.id, c]));
@@ -541,12 +598,33 @@ export default function NotebookEditor() {
           }}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         />
+        <div className="actions">
+          {notebook.public ? (
+            <>
+              <button className="btn ghost" onClick={() => void copyPublicLink()} title="Copy the link anyone can open to read this notebook">
+                <LinkSimple size={14} /> Copy public link
+              </button>
+              <button className="btn" onClick={() => void unpublish()} title="Stop sharing: the link will require a login again">
+                Unpublish
+              </button>
+            </>
+          ) : (
+            <button className="btn" onClick={() => void publish()} title="Make this notebook and its stored outputs readable by anyone with the link (never runnable)">
+              <Globe size={14} /> Publish
+            </button>
+          )}
+        </div>
       </div>
       <div className="nb-head" style={{ marginBottom: 14 }}>
         <div className="meta">
           <span className={`save-state ${saveState}`} title={changed ? `Autosaved. “Discard changes” returns to ${checkpoint?.origin === "save" ? "the last explicit save" : "the document as you opened it"}.` : "Autosaved"}>
             {saveState === "saved" ? `Saved · ${timeAgo(lastSavedAt ?? notebook.updated_at)}` : saveState === "saving" ? "Saving…" : saveState === "dirty" ? "Unsaved changes" : "Save failed"}
           </span>
+          {notebook.public && (
+            <span className="chip accent public" title="Published: readable by anyone with the link, never runnable">
+              <Globe size={11} /> Public
+            </span>
+          )}
           <span>{cells.length} cells</span>
           {counts.errors > 0 && <span style={{ color: "var(--critical)" }}>{counts.errors} error{counts.errors === 1 ? "" : "s"}</span>}
         </div>

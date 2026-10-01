@@ -81,6 +81,9 @@ try {
 }`}
     />
     <P>
+      For a server started with <C>LOOM_PASSWORD</C>, pass the password as <C>token</C> — <C>{`new LoomClient(url, { token })`}</C> — or set <C>LOOM_API_TOKEN</C>, which the client reads by default wherever <C>process.env</C> exists. It is sent as <C>Authorization: Bearer</C> on every request, event streams included; without it the server answers <C>401</C>.
+    </P>
+    <P>
       Every non-2xx response rejects with <C>LoomError</C> (<C>status</C>, and a message built from the server's <C>{`{"error"}`}</C>). All methods are typed; the exported types include <C>WorkflowSpec</C>, <C>TaskSpec</C>, <C>Workflow</C>, <C>Run</C>, <C>TaskRun</C>, <C>RunState</C>, <C>LoomEvent</C>, <C>ColumnProfile</C>, <C>DatasetProfile</C>, and <C>Json</C>.
     </P>
     <Table

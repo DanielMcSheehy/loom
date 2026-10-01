@@ -276,6 +276,11 @@ pub struct Notebook {
     pub name: String,
     #[serde(default)]
     pub cells: Value,
+    /// Published: readable (cells + stored outputs) without authentication.
+    /// Never grants execution. Rows written before this field existed
+    /// deserialize as private.
+    #[serde(default)]
+    pub public: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

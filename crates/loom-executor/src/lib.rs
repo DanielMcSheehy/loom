@@ -629,6 +629,89 @@ export async function handler(params, inputs) {
         );
     }
 
+    /// One-shot HTTP stub standing in for the Loom API: answers the first
+    /// request with `{"rows": []}` and hands back the raw request head.
+    async fn capture_one_request() -> (String, tokio::task::JoinHandle<String>) {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 4096];
+            // Head + the (tiny) JSON body; the body ends with `}`.
+            while !(seen.windows(4).any(|w| w == b"\r\n\r\n") && seen.ends_with(b"}")) {
+                let n = sock.read(&mut buf).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                seen.extend_from_slice(&buf[..n]);
+            }
+            let body = r#"{"rows": []}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            sock.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&seen).to_lowercase()
+        });
+        (url, handle)
+    }
+
+    #[tokio::test]
+    async fn python_bindings_send_the_api_token() {
+        let exec = Executor::new().unwrap();
+        let (url, seen) = capture_one_request().await;
+        // The bindings read their config at import; re-import under the env
+        // the server would have set (LOOM_API_TOKEN = LOOM_PASSWORD).
+        let code = r#"
+import os, sys
+def handler(params, inputs):
+    os.environ["LOOM_API_URL"] = params["url"]
+    os.environ["LOOM_API_TOKEN"] = "s3cret-token"
+    sys.modules.pop("loom", None)
+    import loom
+    return loom.query("SELECT 1")
+"#;
+        let mut r = req(Runtime::Python, code);
+        r.params = json!({ "url": url });
+        let out = exec.execute(r, None).await.unwrap();
+        assert_eq!(out.value, json!([]));
+        assert!(seen
+            .await
+            .unwrap()
+            .contains("authorization: bearer s3cret-token"));
+        assert!(
+            !out.logs.iter().any(|l| l.contains("s3cret-token")),
+            "token must not leak into logs"
+        );
+    }
+
+    #[tokio::test]
+    async fn node_bindings_send_the_api_token() {
+        let exec = Executor::new().unwrap();
+        let (url, seen) = capture_one_request().await;
+        let code = r#"
+export async function handler(params) {
+  process.env.LOOM_API_URL = params.url;
+  process.env.LOOM_API_TOKEN = "s3cret-token";
+  const { loom } = await import(params.shim + "?fresh=" + Date.now());
+  return loom.query("SELECT 1");
+}
+"#;
+        let mut r = req(Runtime::Javascript, code);
+        r.params = json!({
+            "url": url,
+            "shim": format!("file://{}", exec.shim_dir.path().join("loom.mjs").display()),
+        });
+        let out = exec.execute(r, None).await.unwrap();
+        assert_eq!(out.value, json!([]));
+        assert!(seen
+            .await
+            .unwrap()
+            .contains("authorization: bearer s3cret-token"));
+    }
+
     #[tokio::test]
     async fn logs_stream_during_execution() {
         let exec = Executor::new().unwrap();

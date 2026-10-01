@@ -101,7 +101,12 @@ RUST_LOG=debug cargo run -p loom-server          # verbose tracing
 LOOM_DATA_DIR=/tmp/loom-dev cargo run -p ...   # throwaway state
 LOOM_WORKER_POOL=0 cargo run -p ...              # disable warm pool (isolate pooling bugs)
 LOOM_PORT=8080 cargo run -p ...                  # move off :7420
+LOOM_PASSWORD=dev cargo run -p ...               # turn on auth (off by default)
 ```
+
+With `LOOM_PASSWORD` set, curl needs `-H 'authorization: Bearer dev'`, the
+SDKs and examples need `LOOM_API_TOKEN=dev` in their environment, and the
+console shows a login screen. Tests and the examples assume it is unset.
 
 Wipe state completely by deleting the data dir (SQLite file + dataset NDJSON
 files live there and nowhere else).

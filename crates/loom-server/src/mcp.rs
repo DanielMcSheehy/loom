@@ -442,6 +442,7 @@ async fn dispatch(state: &SharedState, tool: &str, args: Value) -> Result<Value,
                 id: Uuid::new_v4(),
                 name: args["name"].as_str().ok_or("missing name")?.to_string(),
                 cells: args.get("cells").cloned().unwrap_or(json!([])),
+                public: false,
                 created_at: now,
                 updated_at: now,
             };

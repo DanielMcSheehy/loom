@@ -305,13 +305,39 @@ export class LoomError extends Error {
   }
 }
 
+export interface LoomClientOptions {
+  /**
+   * The server's `LOOM_PASSWORD`, sent as `Authorization: Bearer <token>` on
+   * every request (including event streams). Defaults to the
+   * `LOOM_API_TOKEN` environment variable where `process.env` exists; leave
+   * both unset for a server running without a password.
+   */
+  token?: string;
+}
+
+/** `process.env.LOOM_API_TOKEN` without assuming a Node runtime. */
+function envToken(): string | undefined {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  return env?.LOOM_API_TOKEN || undefined;
+}
+
 export class LoomClient {
-  constructor(private baseUrl: string = "http://localhost:7420") {
+  private token: string | undefined;
+
+  constructor(
+    private baseUrl: string = "http://localhost:7420",
+    options: LoomClientOptions = {},
+  ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.token = options.token !== undefined ? options.token || undefined : envToken();
+  }
+
+  private authHeaders(): Record<string, string> {
+    return this.token ? { authorization: `Bearer ${this.token}` } : {};
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const init: RequestInit = { method, headers: {} };
+    const init: RequestInit = { method, headers: this.authHeaders() };
     if (body !== undefined) {
       if (typeof body === "string") {
         init.body = body;
@@ -496,7 +522,7 @@ export class LoomClient {
     path: string,
     signal?: AbortSignal,
   ): Promise<ReadableStream<Uint8Array>> {
-    const res = await fetch(`${this.baseUrl}${path}`, { signal });
+    const res = await fetch(`${this.baseUrl}${path}`, { signal, headers: this.authHeaders() });
     if (!res.ok || !res.body) {
       throw new LoomError(res.status, "failed to open event stream");
     }

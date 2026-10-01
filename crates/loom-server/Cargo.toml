@@ -22,6 +22,8 @@ parking_lot = { workspace = true }
 polars = { version = "0.51", features = ["lazy", "json", "sql"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { workspace = true }
+sha2 = "0.10"
+subtle = "2"
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -35,3 +37,4 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tower = { version = "0.5", features = ["util"] }

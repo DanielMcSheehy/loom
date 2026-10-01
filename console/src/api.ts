@@ -1,6 +1,24 @@
 import { useEffect, useRef } from "react";
 import type { LoomEvent } from "./types";
 
+/** A non-2xx API response; `message` is the server's `{"error"}` text. */
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+// The app shell listens for 401s so an expired / revoked session lands on
+// the login screen instead of leaving pages half-loaded.
+const unauthorizedListeners = new Set<() => void>();
+export function onUnauthorized(listener: () => void): () => void {
+  unauthorizedListeners.add(listener);
+  return () => void unauthorizedListeners.delete(listener);
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method };
   if (body !== undefined) {
@@ -15,11 +33,42 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     } catch {
       /* raw text */
     }
-    throw new Error(detail || `HTTP ${res.status}`);
+    if (res.status === 401) unauthorizedListeners.forEach((l) => l());
+    throw new ApiError(res.status, detail || `HTTP ${res.status}`);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+// ── auth (LOOM_PASSWORD) ────────────────────────────────────────────────
+export interface AuthStatus {
+  /** The server has a password set. */
+  enabled: boolean;
+  /** This browser has full access (always true when auth is disabled). */
+  authenticated: boolean;
+}
+
+export const auth = {
+  status: async (): Promise<AuthStatus> => {
+    const res = await fetch("/api/auth/status");
+    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+    return (await res.json()) as AuthStatus;
+  },
+  /** Resolves on success (the session cookie is set); rejects with the server's message. */
+  login: async (password: string): Promise<void> => {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (res.ok) return;
+    const detail = await res.json().catch(() => null) as { error?: string } | null;
+    throw new ApiError(res.status, detail?.error ?? `HTTP ${res.status}`);
+  },
+  logout: async (): Promise<void> => {
+    await fetch("/api/auth/logout", { method: "POST" });
+  },
+};
 
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),

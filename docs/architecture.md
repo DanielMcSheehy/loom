@@ -180,3 +180,40 @@ while the protocol stays identical:
 Timeout handling kills the engine client *and* issues `<engine> kill
 <container-name>` so a wedged worker VM can't be orphaned. Host paths never
 leak into sandboxed workers — the guest only sees the two read-only mounts.
+
+## Authentication (optional)
+
+There is no authentication unless the server is started with `LOOM_PASSWORD`;
+with it unset (the default) every request passes untouched. When set, one
+axum middleware (`auth::guard`, layered over `/api/*` and `/mcp` in
+`routes::app`) decides every request in a fixed order:
+
+1. `/api/healthz` and `/api/auth/*` are always open; so is the static console
+   (it is served by the router's fallback, outside the guarded routes — the
+   SPA asks `GET /api/auth/status` and renders its own login screen).
+2. `Authorization: Bearer <password>` or a valid `loom_session` cookie ⇒ pass.
+   The cookie holds an opaque random token minted by `POST /api/auth/login`
+   and kept in an in-memory map (`Auth::sessions`), so sessions end with the
+   process. Password comparison is constant-time over SHA-256 digests; failed
+   logins drain a per-client-address token bucket.
+3. `?token=<password>` ⇒ pass, on the two `GET` SSE routes only (EventSource
+   cannot set headers).
+4. Anonymous **reads of published notebooks** ⇒ pass: `GET
+   /api/notebooks/{id}` when the stored notebook has `public: true`, and
+   `GET /api/notebooks?public=1` (the handler filters the list). The guard
+   does the store lookup itself, so handlers stay auth-unaware.
+5. Everything else ⇒ `401 {"error":"unauthorized"}` — including private and
+   nonexistent notebooks, which are deliberately indistinguishable.
+
+Publishing is a flag on the notebook document (`Notebook.public`, serde
+default `false`, so rows written before it existed are private). It exposes
+the stored document — cell sources and their saved outputs — and nothing
+else: `/api/execute`, `/api/query`, and all writes stay behind step 2.
+
+Workers need to call back into the API, so `main` exports the password as
+`LOOM_API_TOKEN` before the executor is built: process workers inherit it,
+and container/microVM launches forward it with a name-only `-e
+LOOM_API_TOKEN` (the value never appears in argv). `loom.py` / `loom.mjs`
+send it as a Bearer token. This means code run on the platform can read the
+password — which is consistent with the model: one shared credential, no
+users or roles, and anyone allowed to run code already holds it.

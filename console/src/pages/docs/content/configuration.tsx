@@ -13,7 +13,9 @@ export default (
         row("LOOM_PORT", "7420", "TCP port for the API, MCP endpoint, and console. Binds 0.0.0.0."),
         row("LOOM_DATA_DIR", "./data", <>Created if missing. Holds <C>loom.db</C> (SQLite, WAL mode) and <C>datasets/*.ndjson</C>.</>),
         row("LOOM_CONSOLE_DIST", "./console/dist", <>Built console to serve as a single-page app. Skipped silently when <C>index.html</C> is absent (API only).</>),
+        row("LOOM_PASSWORD", "unset", <>Shared password for the API, the MCP endpoint, and the console. Unset or empty means <strong>no authentication</strong>: every route is open. When set, requests need <C>Authorization: Bearer &lt;password&gt;</C> or a console login; published notebooks stay readable. See <DocLink to="/docs/security">Security</DocLink>.</>),
         row("LOOM_API_URL", "http://127.0.0.1:<port>", <>Base URL workers use for the in-task <C>loom</C> bindings. Set automatically when unset; override if workers run on another host or in containers that cannot reach the loopback address.</>),
+        row("LOOM_API_TOKEN", "= LOOM_PASSWORD", <>Set by the server for its workers when <C>LOOM_PASSWORD</C> is set, so the in-task <C>loom</C> bindings authenticate. Not something you configure on the server; the SDKs read the same variable as their default <C>token</C>.</>),
         row("RUST_LOG", "info", <>Log filter (<C>tracing_subscriber</C> env-filter syntax), e.g. <C>loom_server=debug</C>.</>),
       ]}
     />
@@ -48,7 +50,8 @@ export default (
     <H2 id="examples">Examples</H2>
     <Code
       lang="bash"
-      code={`# production-ish: fixed data dir, built console, quieter logs
+      code={`# production-ish: password, fixed data dir, built console, quieter logs
+LOOM_PASSWORD="$(openssl rand -base64 32)" \\
 LOOM_PORT=7420 LOOM_DATA_DIR=/srv/loom LOOM_CONSOLE_DIST=/srv/loom/console RUST_LOG=warn \\
   ./target/release/loom-server
 
@@ -62,7 +65,7 @@ LOOM_ISOLATION=microvm LOOM_VM_RUNTIME=io.containerd.kata.v2 cargo run --release
 LOOM_PYTHON_BIN=/opt/venv/bin/python LOOM_WORKER_POOL=0 cargo run --release -p loom-server`}
     />
     <Callout kind="note" title="Docker Compose">
-      The repository's <C>docker-compose.yml</C> runs the server with the console built in and a <C>loom-data</C> volume for <C>LOOM_DATA_DIR</C>; <C>docker-compose.coolify.yml</C> adds the Coolify routing variable. Both expose the service without authentication — see <DocLink to="/docs/security">Security</DocLink>.
+      The repository's <C>docker-compose.yml</C> runs the server with the console built in and a <C>loom-data</C> volume for <C>LOOM_DATA_DIR</C>; <C>docker-compose.coolify.yml</C> adds the Coolify routing variable. Unless <C>LOOM_PASSWORD</C> is set in the service's environment, both expose it without authentication — see <DocLink to="/docs/security">Security</DocLink>.
     </Callout>
   </>
 );

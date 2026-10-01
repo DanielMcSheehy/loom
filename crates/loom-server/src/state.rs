@@ -10,6 +10,8 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::auth::Auth;
+
 pub struct AppState {
     pub store: Store,
     pub executor: Executor,
@@ -21,12 +23,27 @@ pub struct AppState {
     /// final state, so "who finished the run" is decided exactly once —
     /// whoever removes the token owns the terminal transition.
     pub cancellations: Mutex<HashMap<Uuid, CancellationToken>>,
+    /// Password + session tokens; disabled when `LOOM_PASSWORD` is unset.
+    pub auth: Auth,
 }
 
 pub type SharedState = Arc<AppState>;
 
 impl AppState {
+    /// State with auth disabled (the default, and what tests want).
+    #[cfg(test)]
     pub fn new(store: Store, executor: Executor, data_dir: PathBuf) -> SharedState {
+        Self::with_password(store, executor, data_dir, None)
+    }
+
+    /// `password`: `None`/empty disables auth; otherwise `/api/*` and `/mcp`
+    /// require it (see [`crate::auth`]).
+    pub fn with_password(
+        store: Store,
+        executor: Executor,
+        data_dir: PathBuf,
+        password: Option<String>,
+    ) -> SharedState {
         let (events, _) = broadcast::channel(4096);
         Arc::new(AppState {
             store,
@@ -34,6 +51,7 @@ impl AppState {
             events,
             data_dir,
             cancellations: Mutex::new(HashMap::new()),
+            auth: Auth::new(password),
         })
     }
 

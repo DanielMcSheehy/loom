@@ -64,6 +64,24 @@ loom-core  ←  loom-store      (persistence)
 - Results are row-capped (`limit`, clamp 1..=200_000) and fetch limit+1 to set
   `truncated` honestly. The API returns summaries, not datasets.
 
+## Auth (loom-server/src/auth.rs)
+
+- Off unless `LOOM_PASSWORD` is set (read once in `main.rs`). `AppState::new`
+  (tests) builds state with auth disabled; `with_password` is the real ctor.
+- ONE place decides access: `auth::guard`, layered in `routes::app` over
+  `/api/*` + `/mcp`. Handlers stay auth-unaware — don't add per-handler
+  checks. Order: open routes (`/api/healthz`, `/api/auth/*`) → Bearer
+  password or `loom_session` cookie → `?token=` on GET SSE routes only →
+  anonymous reads of published notebooks → `401 {"error":"unauthorized"}`.
+- A new route is protected by default. Making anything else anonymous is a
+  contract change: only *reads of `public` notebooks* are, and a private or
+  missing notebook must stay 401 (never 404) to anonymous callers.
+- Publishing never grants execution. Route tests in `routes.rs` pin this
+  (`published_notebook_is_readable_anonymously_but_nothing_else_is`).
+- Sessions are in-memory (die on restart); passwords compare in constant
+  time; failed logins hit a per-peer-address token bucket. Never log the
+  password or a session token.
+
 ## MCP (loom-server/src/mcp.rs)
 
 - Hand-rolled JSON-RPC (streamable HTTP, stateless). Notifications (no `id`)

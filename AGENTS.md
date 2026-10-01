@@ -57,8 +57,13 @@ Server env: `LOOM_PORT` (7420), `LOOM_DATA_DIR` (./data),
 - **Verify like this session did**: unit tests + a live e2e (curl or SDK
   script against a running release server). UI changes get a real-browser
   Playwright screenshot before they're called done.
-- **No authentication exists.** Trusted single-tenant by design. Never imply
-  otherwise in docs/UI; keep the caveat in README/deploy docs when touching them.
+- **Auth is a single shared password.** `LOOM_PASSWORD` unset ⇒ wide open
+  (trusted single-tenant); set ⇒ every `/api/*` and `/mcp` request needs
+  `Authorization: Bearer <password>`, the `loom_session` cookie, or `?token=`
+  on SSE. Only `/api/healthz`, `/api/auth/*`, and *published* notebooks
+  (`public: true`, read-only) are open. New routes are protected by default;
+  never add an unauthenticated route that can execute code or read non-public
+  data. Keep the "unset = open, don't expose it" caveat in README/deploy docs.
 - **Polars is pinned to 0.51** — 0.54+ needs nightly rustc features. Don't bump
   without checking `cargo check` on stable.
 - **Rust edition stays 2021** — `main.rs` uses `std::env::set_var` (unsafe in 2024).

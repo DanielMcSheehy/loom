@@ -51,6 +51,49 @@ export const ROUTE_GROUPS: RouteGroup[] = [
     ],
   },
   {
+    id: "auth",
+    title: "Authentication",
+    intro: "Only relevant when the server was started with LOOM_PASSWORD; without it these routes still answer, and nothing requires a credential. API clients skip the session entirely and send Authorization: Bearer <password> on every request. All three routes are always open.",
+    routes: [
+      {
+        method: "GET",
+        path: "/api/auth/status",
+        summary: "Whether auth is enabled, and whether this request is authenticated.",
+        description: "The console calls this on load to choose between the app and the login screen. authenticated is true whenever the caller has full access — including when auth is disabled.",
+        status: "200 OK",
+        response: `{ "enabled": true, "authenticated": false }`,
+        examples: { curl: `curl localhost:7420/api/auth/status` },
+      },
+      {
+        method: "POST",
+        path: "/api/auth/login",
+        summary: "Exchange the password for a session cookie.",
+        description: "Sets loom_session: an opaque random token (HttpOnly, SameSite=Lax, Secure behind HTTPS, 30 days). Sessions are held in memory, so a server restart ends them. Failed attempts are rate-limited per client address: a burst of five, then one every two seconds.",
+        body: [{ name: "password", type: "string", desc: "The server's LOOM_PASSWORD." }],
+        status: "200 OK",
+        response: `{ "ok": true }`,
+        errors: [
+          { status: "401 Unauthorized", when: "Wrong password — `{\"error\": \"invalid password\"}`." },
+          { status: "429 Too Many Requests", when: "Too many failed attempts from this address; see the Retry-After header." },
+        ],
+        examples: {
+          curl: `curl -c cookies.txt -X POST localhost:7420/api/auth/login \\
+  -H 'content-type: application/json' -d '{"password": "'"$LOOM_PASSWORD"'"}'
+curl -b cookies.txt localhost:7420/api/stats`,
+        },
+      },
+      {
+        method: "POST",
+        path: "/api/auth/logout",
+        summary: "End the session.",
+        description: "Revokes the session token server-side and clears the cookie. Safe to call without a session.",
+        status: "200 OK",
+        response: `{ "ok": true }`,
+        examples: { curl: `curl -b cookies.txt -X POST localhost:7420/api/auth/logout` },
+      },
+    ],
+  },
+  {
     id: "workflows",
     title: "Workflows",
     intro: "A workflow is a stored WorkflowSpec plus an id. The DAG is validated on create and update.",
@@ -261,7 +304,7 @@ export const ROUTE_GROUPS: RouteGroup[] = [
         method: "GET",
         path: "/api/events",
         summary: "Every event on the platform.",
-        description: "Run and task updates, log lines, ingests, and function invocations.",
+        description: "Run and task updates, log lines, ingests, and function invocations. With LOOM_PASSWORD set, browsers' EventSource cannot send a header: the two SSE routes (and only these) also accept ?token=<password>.",
         status: "200 OK · text/event-stream",
         response: `data: {"type":"run_updated","ts":"…","run":{…}}
 
@@ -270,7 +313,8 @@ data: {"type":"log","ts":"…","run_id":"9a2d…","task_id":"extract","line":"pu
 data: {"type":"ingested","ts":"…","dataset":"readings","records":5000,"bytes":231000}`,
         responseLang: "plain",
         examples: {
-          curl: `curl -N localhost:7420/api/events`,
+          curl: `curl -N localhost:7420/api/events
+curl -N "localhost:7420/api/events?token=$LOOM_PASSWORD"   # when the server has a password`,
           python: `for event in client.events():
     print(event["type"])`,
           typescript: `for await (const event of client.events()) console.log(event.type);`,
@@ -607,15 +651,18 @@ const pg = await client.query("SELECT now()", { connector: "warehouse" });`,
   {
     id: "notebooks",
     title: "Notebooks",
-    intro: "Notebook documents are stored as opaque JSON: the console owns the cell schema, and cells execute through /api/execute and /api/query.",
+    intro: "Notebook documents are stored as opaque JSON: the console owns the cell schema, and cells execute through /api/execute and /api/query. A published notebook (public: true) can be read — never run or changed — without authentication.",
     routes: [
       {
         method: "GET",
         path: "/api/notebooks",
         summary: "List notebooks (with their cells).",
+        query: [{ name: "public", type: "1 | true", note: "optional", desc: "Only published notebooks. With LOOM_PASSWORD set, this is the one form of the list that needs no authentication." }],
         status: "200 OK",
-        response: `[ { "id": "…", "name": "Sensor analysis", "cells": [ … ], "created_at": "…", "updated_at": "…" } ]`,
-        examples: { curl: `curl localhost:7420/api/notebooks` },
+        response: `[ { "id": "…", "name": "Sensor analysis", "cells": [ … ], "public": false, "created_at": "…", "updated_at": "…" } ]`,
+        errors: [{ status: "401 Unauthorized", when: "Auth is enabled, no credential, and public=1 was not given." }],
+        examples: { curl: `curl localhost:7420/api/notebooks
+curl 'localhost:7420/api/notebooks?public=1'   # published only; no credential needed` },
       },
       {
         method: "POST",
@@ -624,9 +671,10 @@ const pg = await client.query("SELECT now()", { connector: "warehouse" });`,
         body: [
           { name: "name", type: "string", desc: "Display name." },
           { name: "cells", type: "json", note: "null", desc: "Any JSON; the console stores an array of NotebookCell objects (see the Notebooks guide)." },
+          { name: "public", type: "boolean", note: "false", desc: "Create it already published." },
         ],
         status: "201 Created",
-        response: `{ "id": "…", "name": "Sensor analysis", "cells": [], "created_at": "…", "updated_at": "…" }`,
+        response: `{ "id": "…", "name": "Sensor analysis", "cells": [], "public": false, "created_at": "…", "updated_at": "…" }`,
         examples: {
           curl: `curl -X POST localhost:7420/api/notebooks -H 'content-type: application/json' -d '{
   "name": "Sensor analysis",
@@ -641,10 +689,14 @@ const pg = await client.query("SELECT now()", { connector: "warehouse" });`,
         method: "GET",
         path: "/api/notebooks/{id}",
         summary: "Fetch one notebook.",
+        description: "Cells come back with their stored outputs. When the notebook is published this route needs no authentication — it is what the read-only public page loads.",
         params: [{ name: "id", desc: "Notebook UUID." }],
         status: "200 OK",
-        response: `{ "id": "…", "name": "…", "cells": [ … ], "created_at": "…", "updated_at": "…" }`,
-        errors: [{ status: "404 Not Found", when: "Unknown notebook." }],
+        response: `{ "id": "…", "name": "…", "cells": [ … ], "public": true, "created_at": "…", "updated_at": "…" }`,
+        errors: [
+          { status: "404 Not Found", when: "Unknown notebook (authenticated callers, or auth disabled)." },
+          { status: "401 Unauthorized", when: "Auth is enabled, no credential, and the notebook is not published — or does not exist; the two are deliberately indistinguishable." },
+        ],
         examples: { curl: `curl localhost:7420/api/notebooks/$NB` },
       },
       {
@@ -655,9 +707,10 @@ const pg = await client.query("SELECT now()", { connector: "warehouse" });`,
         body: [
           { name: "name", type: "string", desc: "Display name." },
           { name: "cells", type: "json", note: "null", desc: "Full cell array; the server does not merge." },
+          { name: "public", type: "boolean", note: "unchanged", desc: "Publish or unpublish in the same write. Omit it to keep the current value." },
         ],
         status: "200 OK",
-        response: `{ "id": "…", "name": "…", "cells": [ … ], "created_at": "…", "updated_at": "…" }`,
+        response: `{ "id": "…", "name": "…", "cells": [ … ], "public": false, "created_at": "…", "updated_at": "…" }`,
         errors: [{ status: "404 Not Found", when: "Unknown notebook." }],
         examples: { curl: `curl -X PUT localhost:7420/api/notebooks/$NB -H 'content-type: application/json' -d @notebook.json` },
       },
@@ -672,6 +725,31 @@ const pg = await client.query("SELECT now()", { connector: "warehouse" });`,
         errors: [{ status: "404 Not Found", when: "Unknown notebook." }],
         examples: { curl: `curl -X DELETE localhost:7420/api/notebooks/$NB` },
       },
+      {
+        method: "POST",
+        path: "/api/notebooks/{id}/publish",
+        summary: "Publish: make the notebook readable without authentication.",
+        description: "Anyone with the id can then GET the notebook — cell sources and stored outputs — and open it read-only in the console at /notebooks/{id}. It grants nothing else: execution, queries, and writes stay protected. Idempotent; updated_at is not touched. No request body.",
+        params: [{ name: "id", desc: "Notebook UUID." }],
+        status: "200 OK",
+        response: `{ "id": "…", "name": "…", "cells": [ … ], "public": true, "created_at": "…", "updated_at": "…" }`,
+        errors: [{ status: "404 Not Found", when: "Unknown notebook." }],
+        examples: {
+          curl: `curl -X POST localhost:7420/api/notebooks/$NB/publish -H "authorization: Bearer $LOOM_PASSWORD"
+curl localhost:7420/api/notebooks/$NB        # now works with no credential`,
+        },
+      },
+      {
+        method: "POST",
+        path: "/api/notebooks/{id}/unpublish",
+        summary: "Unpublish: require authentication again.",
+        description: "Takes effect immediately; anonymous reads go back to 401. Idempotent. No request body.",
+        params: [{ name: "id", desc: "Notebook UUID." }],
+        status: "200 OK",
+        response: `{ "id": "…", "name": "…", "cells": [ … ], "public": false, "created_at": "…", "updated_at": "…" }`,
+        errors: [{ status: "404 Not Found", when: "Unknown notebook." }],
+        examples: { curl: `curl -X POST localhost:7420/api/notebooks/$NB/unpublish -H "authorization: Bearer $LOOM_PASSWORD"` },
+      },
     ],
   },
   {
@@ -682,7 +760,7 @@ const pg = await client.query("SELECT now()", { connector: "warehouse" });`,
         method: "POST",
         path: "/mcp",
         summary: "Model Context Protocol endpoint (streamable HTTP, stateless).",
-        description: "One JSON-RPC message per request, plain JSON back. Methods: initialize, ping, tools/list, tools/call. Notifications (no id) are acknowledged with 202 and no body. Mounted outside /api. See the MCP server page for every tool.",
+        description: "One JSON-RPC message per request, plain JSON back. Methods: initialize, ping, tools/list, tools/call. Notifications (no id) are acknowledged with 202 and no body. Mounted outside /api. With LOOM_PASSWORD set it requires Authorization: Bearer <password> like the REST routes. See the MCP server page for every tool.",
         bodyNote: "A JSON-RPC 2.0 request object.",
         status: "200 OK",
         response: `{ "jsonrpc": "2.0", "id": 1, "result": { "tools": [ … ] } }

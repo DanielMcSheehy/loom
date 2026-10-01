@@ -9,24 +9,28 @@ import {
   Moon,
   Play,
   Sidebar,
+  SignOut,
   SquaresFour,
   Sun,
 } from "@phosphor-icons/react";
-import { Suspense, createContext, lazy, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { useEvents } from "./api";
+import { Suspense, createContext, lazy, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useMatch } from "react-router-dom";
+import { auth, onUnauthorized, useEvents, type AuthStatus } from "./api";
+import { AuthCtx, useAuth } from "./auth";
 import CommandPalette from "./components/CommandPalette";
 import { ToastProvider } from "./components/ui";
 import Dashboard from "./pages/Dashboard";
 import Data from "./pages/Data";
 import Functions from "./pages/Functions";
+import Login from "./pages/Login";
 import NotebookEditor from "./pages/NotebookEditor";
 import Notebooks from "./pages/Notebooks";
+import PublishedNotebook from "./pages/PublishedNotebook";
 import RunDetail from "./pages/RunDetail";
 import Runs from "./pages/Runs";
 import WorkflowDetail from "./pages/WorkflowDetail";
 import Workflows from "./pages/Workflows";
-import { useTheme } from "./theme";
+import { useTheme, type Theme } from "./theme";
 
 // Docs content is sizeable and rarely visited; keep it out of the main chunk.
 const Docs = lazy(() => import("./pages/docs/Docs"));
@@ -53,8 +57,75 @@ const NAV: Array<{ to: string; label: string; icon: ReactNode; end?: boolean; ke
   { to: "/docs", label: "Docs", icon: <Books size={18} />, key: "7" },
 ];
 
+/**
+ * Auth gate. With a server password (LOOM_PASSWORD) and no session, the app
+ * is replaced by the login screen — except `/notebooks/:id`, which tries the
+ * read-only published view first (the server serves public notebooks
+ * anonymously and answers 401 for everything else).
+ */
 export default function App() {
   const { theme, toggle } = useTheme();
+  const [status, setStatus] = useState<AuthStatus | null>(null);
+  // Set when a visitor asks to log in from a published notebook, or when
+  // the notebook they opened turns out not to be public.
+  const [wantLogin, setWantLogin] = useState<"asked" | "required" | null>(null);
+  const notebookRoute = useMatch("/notebooks/:id");
+  const location = useLocation();
+
+  const refresh = useCallback(
+    () =>
+      auth
+        .status()
+        .then(setStatus)
+        // No answer (server down, or one that predates auth): behave as before.
+        .catch(() => setStatus((s) => s ?? { enabled: false, authenticated: true })),
+    [],
+  );
+  useEffect(() => void refresh(), [refresh]);
+  // Any 401 from the API means the session is gone: re-check and fall back
+  // to the login screen rather than leaving a half-loaded page.
+  useEffect(() => onUnauthorized(() => void refresh()), [refresh]);
+  useEffect(() => setWantLogin(null), [location.pathname]);
+
+  const logout = useCallback(() => {
+    void auth.logout().finally(refresh);
+  }, [refresh]);
+  const authCtx = useMemo(() => ({ enabled: status?.enabled ?? false, logout }), [status?.enabled, logout]);
+
+  if (!status) return null;
+
+  if (status.enabled && !status.authenticated) {
+    const publishedId = notebookRoute?.params.id;
+    if (publishedId && !wantLogin) {
+      return (
+        <PublishedNotebook
+          id={publishedId}
+          onLogin={() => setWantLogin("asked")}
+          onUnavailable={() => setWantLogin("required")}
+          theme={theme}
+          onToggleTheme={toggle}
+        />
+      );
+    }
+    return (
+      <Login
+        onSuccess={() => void refresh().then(() => setWantLogin(null))}
+        theme={theme}
+        onToggleTheme={toggle}
+        onBack={wantLogin === "asked" ? () => setWantLogin(null) : undefined}
+      />
+    );
+  }
+
+  return (
+    <AuthCtx.Provider value={authCtx}>
+      <Shell theme={theme} toggle={toggle} />
+    </AuthCtx.Provider>
+  );
+}
+
+function Shell({ theme, toggle }: { theme: Theme; toggle: () => void }) {
+  const { enabled: authEnabled, logout } = useAuth();
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("loom.sidebar") === "collapsed");
@@ -120,6 +191,12 @@ export default function App() {
                 <Sidebar size={17} />
                 <span className="nav-label">Collapse</span>
               </button>
+              {authEnabled && (
+                <button className="nav-link" onClick={logout} title="Log out" style={{ border: "none", background: "none", cursor: "pointer", width: "100%" }}>
+                  <SignOut size={17} />
+                  <span className="nav-label">Log out</span>
+                </button>
+              )}
             </div>
           </aside>
           <main className="main">

@@ -80,7 +80,7 @@ export async function handler(params: { n: number }, inputs: Record<string, unkn
 
     <H3 id="platform-bindings">Platform bindings inside a task</H3>
     <P>
-      Every worker can reach back into the platform over <C>LOOM_API_URL</C>: <C>import loom</C> in Python, or the pre-installed <C>loom</C> global in JavaScript/TypeScript. Both expose the same three calls. Python calls bypass any configured HTTP proxy.
+      Every worker can reach back into the platform over <C>LOOM_API_URL</C>: <C>import loom</C> in Python, or the pre-installed <C>loom</C> global in JavaScript/TypeScript. Both expose the same three calls. Python calls bypass any configured HTTP proxy. When the server has <C>LOOM_PASSWORD</C> set it passes workers the credential as <C>LOOM_API_TOKEN</C>, and the bindings send it automatically.
     </P>
     <Table
       head={["Call", "Does", "Returns"]}

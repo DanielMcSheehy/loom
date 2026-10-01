@@ -125,10 +125,15 @@ export default (
     />
 
     <H3 id="register">Register with a client</H3>
+    <P>
+      When the server has <C>LOOM_PASSWORD</C> set, <C>/mcp</C> requires <C>Authorization: Bearer &lt;password&gt;</C> like every REST route (otherwise <C>401</C>); add the header when registering. Without a password the endpoint is open — see <DocLink to="/docs/security">Security</DocLink>.
+    </P>
     <Code
       lang="bash"
       code={`# Claude Code
 claude mcp add --transport http loom http://localhost:7420/mcp
+# …against a server with LOOM_PASSWORD
+claude mcp add --transport http loom https://loom.example.com/mcp --header "Authorization: Bearer $LOOM_PASSWORD"
 
 # by hand
 curl -X POST localhost:7420/mcp -H 'content-type: application/json' \\

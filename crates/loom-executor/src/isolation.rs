@@ -24,6 +24,10 @@ use loom_core::Runtime;
 /// Paths the shim/job directories are mounted at inside containers/microVMs.
 pub const GUEST_SHIM_DIR: &str = "/loom/shim";
 pub const GUEST_JOB_DIR: &str = "/loom/job";
+/// Credential for the in-task `loom` bindings. The server sets it (to
+/// `LOOM_PASSWORD`) in its own environment when auth is on; process workers
+/// inherit it, sandboxes get it forwarded by name.
+pub const API_TOKEN_ENV: &str = "LOOM_API_TOKEN";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Isolation {
@@ -209,6 +213,11 @@ pub fn plan(
                 args.push("--runtime".into());
                 args.push(rt.clone());
             }
+            // Name-only `-e`: the engine copies the value from its own
+            // environment (inherited from the server) when it is set, so the
+            // credential never appears in argv / process listings.
+            args.push("-e".into());
+            args.push(API_TOKEN_ENV.into());
             args.push("-v".into());
             args.push(format!(
                 "{}:{GUEST_SHIM_DIR}:ro",
@@ -299,6 +308,10 @@ mod tests {
         assert!(joined.contains("--cpus 1"));
         assert!(joined.contains("-v /host/shims:/loom/shim:ro"));
         assert!(joined.contains("-v /host/job-1:/loom/job:ro"));
+        assert!(
+            joined.contains("-e LOOM_API_TOKEN -v"),
+            "token forwarded by name, never by value"
+        );
         assert!(joined.contains("python:3.12-slim python3 /loom/shim/worker.py"));
         assert!(
             !joined.contains("--runtime"),

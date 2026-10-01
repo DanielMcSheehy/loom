@@ -34,6 +34,14 @@
   "simplify" the order.
 - Handler signature everywhere: `handler(params, inputs)`; `inputs` maps
   upstream task ids to results.
+- **Auth is one optional token**: `LoomClient(base_url, token=None)` /
+  `new LoomClient(baseUrl, { token })`, defaulting to the `LOOM_API_TOKEN`
+  env var (TS: only where `process.env` exists). It is the server's
+  `LOOM_PASSWORD`, sent as `Authorization: Bearer` on *every* request —
+  including the SSE streams, which is why they use fetch/urllib rather than
+  EventSource. No token ⇒ no header, so servers without a password and the
+  examples keep working unchanged. An explicit empty token disables the env
+  default.
 
 ## Layout
 

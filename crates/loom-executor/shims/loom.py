@@ -2,7 +2,9 @@
 
 Available to every task and function as `import loom` — the worker shim
 puts this module on `sys.path`. Local API calls deliberately bypass any
-configured HTTP proxy.
+configured HTTP proxy. When the server runs with `LOOM_PASSWORD`, it hands
+workers the credential as `LOOM_API_TOKEN` and every call sends it as a
+Bearer token.
 
     import loom
 
@@ -16,13 +18,15 @@ import os
 import urllib.request
 
 _API = os.environ.get("LOOM_API_URL", "http://127.0.0.1:7420").rstrip("/")
+_TOKEN = os.environ.get("LOOM_API_TOKEN", "")
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _request(method, path, data, content_type="application/json"):
-    req = urllib.request.Request(
-        _API + path, data=data, method=method, headers={"content-type": content_type}
-    )
+    headers = {"content-type": content_type}
+    if _TOKEN:
+        headers["authorization"] = f"Bearer {_TOKEN}"
+    req = urllib.request.Request(_API + path, data=data, method=method, headers=headers)
     with _OPENER.open(req) as resp:
         return json.loads(resp.read())
 

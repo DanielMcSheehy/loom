@@ -143,6 +143,8 @@ export interface Notebook {
   id: string;
   name: string;
   cells: NotebookCell[] | null;
+  /** Published: readable by anyone with the link, never runnable. */
+  public?: boolean;
   created_at: string;
   updated_at: string;
 }

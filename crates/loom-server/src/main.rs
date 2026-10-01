@@ -1,3 +1,4 @@
+mod auth;
 mod connectors;
 mod data;
 mod error;
@@ -7,12 +8,11 @@ mod routes;
 mod scheduler;
 mod state;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use axum::Router;
 use loom_executor::Executor;
 use loom_store::Store;
-use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -35,17 +35,26 @@ async fn main() -> anyhow::Result<()> {
     if std::env::var("LOOM_API_URL").is_err() {
         std::env::set_var("LOOM_API_URL", format!("http://127.0.0.1:{port}"));
     }
+    // Optional password auth. Workers get the credential as LOOM_API_TOKEN
+    // so the in-task `loom` bindings keep working when auth is on.
+    let password = std::env::var("LOOM_PASSWORD")
+        .ok()
+        .filter(|p| !p.is_empty());
+    if let Some(password) = &password {
+        std::env::set_var("LOOM_API_TOKEN", password);
+    }
     let store = Store::open(data_dir.join("loom.db"))?;
     let executor = Executor::new()?;
-    let state = state::AppState::new(store, executor, data_dir);
+    let state = state::AppState::with_password(store, executor, data_dir, password);
+    if state.auth.enabled() {
+        info!("password auth enabled (LOOM_PASSWORD); published notebooks stay readable");
+    } else {
+        info!("LOOM_PASSWORD not set — the API is open to anyone who can reach this port");
+    }
 
     scheduler::spawn(state.clone());
 
-    let mut app = Router::new()
-        .nest("/api", routes::api_router())
-        .route("/mcp", axum::routing::post(mcp::handle))
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+    let mut app = routes::app(state);
 
     // Serve the built console when present (docker / production).
     if console_dist.join("index.html").exists() {
@@ -57,7 +66,12 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
     info!("loom-server listening on http://0.0.0.0:{port}");
-    axum::serve(listener, app).await?;
+    // Connect-info gives the login rate limiter the peer address.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

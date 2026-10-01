@@ -43,6 +43,24 @@ const crunch = task("crunch", {
 });
 ```
 
+## Authentication
+
+A server started with `LOOM_PASSWORD` rejects requests without the password
+(HTTP 401, `LoomError.status === 401`). Pass it as `token` — it is sent as
+`Authorization: Bearer <token>` on every request, event streams included —
+or set `LOOM_API_TOKEN`, which the client reads by default wherever
+`process.env` exists:
+
+```ts
+const client = new LoomClient("https://loom.example.com", { token: "the-server-password" });
+
+// or: LOOM_API_TOKEN=the-server-password node app.js
+const client = new LoomClient("https://loom.example.com");
+```
+
+A server without `LOOM_PASSWORD` has no authentication; no token is needed.
+Don't ship the token in browser bundles — it is the server's only credential.
+
 ## Stream a run live
 
 ```ts

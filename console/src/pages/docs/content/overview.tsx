@@ -112,8 +112,8 @@ topo_layers(DAG) — Kahn's algorithm (validated at create/update)
       ]}
     />
 
-    <Callout kind="warn" title="No authentication">
-      Loom has no authentication or authorization layer. It is designed as a trusted, single-tenant service: anyone who can reach the port can run code. See <DocLink to="/docs/security">Security</DocLink> before exposing it.
+    <Callout kind="warn" title="No authentication by default">
+      Unless the server is started with <C>LOOM_PASSWORD</C>, Loom has no authentication: anyone who can reach the port can run code. The password is one shared credential for a trusted, single-tenant service — there are no users or roles. See <DocLink to="/docs/security">Security</DocLink> before exposing it.
     </Callout>
 
     <H2 id="pages">All pages</H2>

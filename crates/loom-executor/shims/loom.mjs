@@ -8,14 +8,16 @@
 //     await loom.ingest("aggregates", rows);
 //     return loom.invoke("notify", { count: rows.length });
 //   }
+//
+// When the server runs with LOOM_PASSWORD, it hands workers the credential
+// as LOOM_API_TOKEN and every call sends it as a Bearer token.
 const API = (process.env.LOOM_API_URL ?? "http://127.0.0.1:7420").replace(/\/+$/, "");
+const TOKEN = process.env.LOOM_API_TOKEN ?? "";
 
 async function request(path, body, contentType = "application/json") {
-  const res = await fetch(API + path, {
-    method: "POST",
-    headers: { "content-type": contentType },
-    body,
-  });
+  const headers = { "content-type": contentType };
+  if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
+  const res = await fetch(API + path, { method: "POST", headers, body });
   if (!res.ok) {
     throw new Error(`loom api ${path}: HTTP ${res.status}: ${await res.text()}`);
   }

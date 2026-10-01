@@ -1,4 +1,4 @@
-import { BookOpen, ChartBar, Code, Database, DotsThree, Plus, Trash } from "@phosphor-icons/react";
+import { BookOpen, ChartBar, Code, Database, DotsThree, Globe, Plus, Trash } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, timeAgo } from "../api";
@@ -136,6 +136,11 @@ export default function Notebooks() {
                     {cells.slice(0, 24).map((c) => <span key={c.id} className={c.kind} />)}
                   </span>
                   <span>{cells.length} cells</span>
+                  {nb.public && (
+                    <span className="chip accent public" title="Published: readable by anyone with the link">
+                      <Globe size={11} /> Public
+                    </span>
+                  )}
                   <span className="grow" />
                   <span>{timeAgo(nb.updated_at)}</span>
                 </div>

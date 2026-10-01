@@ -29,6 +29,9 @@ services:
       - LOOM_PORT=7420
       - LOOM_DATA_DIR=/data
       - LOOM_CONSOLE_DIST=/app/console/dist
+      # Set LOOM_PASSWORD in the Coolify resource's Environment Variables tab.
+      # Unset = no auth at all (do not expose that publicly).
+      - LOOM_PASSWORD=${LOOM_PASSWORD:-}
       # Worker pool / isolation knobs (see README):
       # - LOOM_WORKER_MAX_IDLE=8
       # - LOOM_WORKER_MAX_JOBS=128

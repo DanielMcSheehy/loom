@@ -1,13 +1,76 @@
-# Loom
+<h1 align="center">Loom</h1>
 
-**A Rust-native orchestration platform for Python and TypeScript workloads** —
-workflow DAGs, serverless functions, streaming NDJSON ingestion, embedded SQL
-(Polars), executable notebooks, and an MCP server for AI agents. One static
-binary, SQLite inside. No broker, no external database, no YAML.
+<p align="center"><strong>Notebooks your AI can write. Pipelines it can run. One binary.</strong></p>
 
-[![CI](https://github.com/DanielMcSheehy/rust-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/DanielMcSheehy/rust-orchestrator/actions/workflows/ci.yml)
+<p align="center">
+Point Claude, Cursor, or any MCP-speaking agent at Loom and it comes back with a
+<em>runnable, explainable</em> notebook — the SQL, the Python/TypeScript, the charts,
+and the prose — backed by a real workflow run you can inspect. No Jupyter kernel to
+babysit, no Postgres, no Kubernetes: a single Rust binary with SQLite inside.
+</p>
+
+<p align="center">
+<a href="https://github.com/DanielMcSheehy/rust-orchestrator/actions/workflows/ci.yml"><img src="https://github.com/DanielMcSheehy/rust-orchestrator/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://github.com/DanielMcSheehy/rust-orchestrator/actions/workflows/image.yml"><img src="https://github.com/DanielMcSheehy/rust-orchestrator/actions/workflows/image.yml/badge.svg" alt="Image"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
+<a href="https://github.com/DanielMcSheehy/rust-orchestrator/pkgs/container/rust-orchestrator"><img src="https://img.shields.io/badge/ghcr.io-rust--orchestrator-24292f?logo=docker" alt="GHCR"></a>
+<img src="https://img.shields.io/badge/rust-stable-orange?logo=rust" alt="Rust">
+<img src="https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white" alt="Python">
+<img src="https://img.shields.io/badge/node-22-339933?logo=node.js&logoColor=white" alt="Node">
+</p>
 
 ![Loom — orchestrate Python & TypeScript at Rust speed](docs/screenshots/landing-hero.png)
+
+## 60-second demo
+
+```bash
+docker run -p 7420:7420 -e LOOM_PASSWORD=change-me ghcr.io/danielmcsheehy/rust-orchestrator
+claude mcp add --transport http loom http://localhost:7420/mcp --header "Authorization: Bearer change-me"
+```
+
+Then ask your agent:
+
+> *"Build me a lab notebook that teaches how gradient descent works: generate data, fit it with
+> numpy and sklearn, show the loss curves for three learning rates, and explain the math."*
+
+It will create a workflow, run it, ingest the results, query them with SQL, and write a notebook
+with charts — all through the 15-tool MCP server. Open `http://localhost:7420` to watch it happen,
+then hit **Publish** to share the finished notebook read-only.
+
+## Built by agents, on Loom
+
+Every notebook below was produced end to end by an AI agent talking to Loom's API — no human
+touched the UI. Each one is a real Python + TypeScript DAG whose results were ingested, queried
+with SQL, and charted in a teaching notebook.
+
+| Lab | What it teaches |
+| --- | --- |
+| **Linear regression from the ground up** | Normal equation vs sklearn (match to 9e-14), gradient descent with a learning rate that diverges past the stability limit, Ridge/Lasso coefficient paths |
+| **How a classifier decides** | Sigmoid, log-loss, decision boundary map, threshold sweep → ROC/AUC (0.9968 on breast-cancer), calibration vs tree and k-NN |
+| **Overfitting, bias-variance, cross-validation** | Polynomials degree 1–15 on a noisy sine, bias²/variance from 200 bootstraps, k-fold picking the degree, learning curves |
+| **How Shazam hears music** | Naive DFT vs radix-2 FFT (548× faster at N=4096), spectrogram, constellation hashes, matching a noisy clip |
+| **PageRank on a synthetic web** | Power iteration, damping sweep, link farms losing to real authority |
+| **Backprop from scratch** | A 2→36→36→1 MLP in TypeScript, chain rule written out, decision-boundary snapshots per epoch |
+
+![Gradient descent loss curves — five learning rates, one of them diverging](docs/screenshots/notebook-gradient-descent.png)
+
+![Notebook lab — training a neural net from scratch on two spirals: SQL, charts, and the math in markdown](docs/screenshots/notebook.png)
+
+## Why Loom
+
+| | Loom | Jupyter / marimo | Airflow / Prefect / Dagster | Windmill |
+| --- | --- | --- | --- | --- |
+| Agent-native API for the *whole* loop (code → data → SQL → notebook) | ✅ MCP + REST | notebook-only | pipeline-only | scripts/flows |
+| Install | one binary / one container | Python env + kernel | broker + DB + scheduler | Postgres + workers |
+| Python **and** TypeScript tasks in one DAG, results crossing languages | ✅ | — | Python | ✅ |
+| SQL over results without pandas (embedded Polars) | ✅ | — | — | — |
+| Notebooks with charts, reactive cells, data-aware autocomplete | ✅ | ✅ | — | — |
+| Publish a notebook read-only with its outputs | ✅ | export | — | — |
+| Cold-start overhead per task | ~1 ms (warm pool) | — | seconds | ~ms |
+
+Loom is not trying to replace your production scheduler. It's the thing you reach for when
+you want an agent — or yourself — to go from "I have a question about this data" to a
+shareable, runnable, explained answer in one sitting.
 
 ## What it does
 
@@ -73,12 +136,7 @@ Every screenshot below is the real UI, served by the binary itself.
 | --- | --- |
 | ![SQL over ingested datasets](docs/screenshots/data-query.png) | ![Serverless function playground](docs/screenshots/functions.png) |
 
-![Notebook lab — training a neural net from scratch on two spirals: SQL, charts, and the math in markdown](docs/screenshots/notebook.png)
-
-The workflow, run, and notebook above are real "labs" built on Loom: a Shazam-style audio
-fingerprinter (Fourier transforms), PageRank on a synthetic web, and backpropagation from
-scratch — each a Python + TypeScript DAG whose results are ingested, queried with SQL, and
-charted in a teaching notebook.
+![Radar chart — one of nine chart marks, with per-series colours and min/avg/max statistic lines](docs/screenshots/chart-radar.png)
 
 ## Architecture
 
@@ -132,8 +190,26 @@ redeploy right after each image build, set the repo secrets
 (an API token with deploy permission), and turn off Coolify's own
 auto-deploy on push so it never pulls before the new image exists.
 
-The API has no authentication (trusted single-tenant): keep the resource
-internal, or front it with Coolify's access controls before exposing it.
+### Authentication & publishing
+
+Set `LOOM_PASSWORD` and everything — API, MCP, console — requires it:
+
+```bash
+LOOM_PASSWORD=change-me cargo run --release -p loom-server   # or -e LOOM_PASSWORD=… in Docker/Coolify
+
+curl -H 'Authorization: Bearer change-me' localhost:7420/api/workflows   # SDKs: LoomClient(url, token=…) or LOOM_API_TOKEN
+```
+
+The console shows a login screen and keeps a session cookie. Tasks and functions
+calling `loom.query()` get the credential injected automatically.
+
+**Published notebooks** are the one exception. Hit **Publish** on a notebook (or
+`POST /api/notebooks/{id}/publish`) and anyone with the link can *read* it — cells,
+stored outputs, charts — but nothing on a public page can execute, edit, or reach
+any other data. Unpublish any time.
+
+Leave `LOOM_PASSWORD` unset and Loom runs wide open, as a trusted single-tenant tool
+on your own machine. Don't expose that to the internet.
 
 ### Your first workflow (curl)
 
@@ -199,7 +275,9 @@ the SDK READMEs for streaming, functions, and ingestion.
 | `POST /api/query` | SQL via embedded Polars, or `{"connector": name}` for Postgres/ClickHouse/chDB |
 | `POST /api/execute` | Run a Python/TS/JS snippet on the warm pool (`{"runtime", "code", "params", "inputs"}`) |
 | `GET/POST /api/connectors`, `DELETE /api/connectors/{name}` | External engine registry |
-| `GET/POST /api/notebooks`, `GET/PUT/DELETE /api/notebooks/{id}` | Notebook documents |
+| `GET/POST /api/notebooks`, `GET/PUT/DELETE /api/notebooks/{id}` | Notebook documents (`?public=1` and public ids readable without auth) |
+| `POST /api/notebooks/{id}/publish`, `…/unpublish` | Make a notebook readable by anyone with the link (never runnable) |
+| `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/status` | Session cookie for the console; `Authorization: Bearer <LOOM_PASSWORD>` everywhere else |
 | `POST /mcp` | Model Context Protocol endpoint (15 tools for AI agents) |
 
 ## Writing tasks
@@ -256,7 +334,7 @@ cd sdks/typescript && npm run build
 
 Configuration (env vars): `LOOM_PORT` (7420), `LOOM_DATA_DIR` (`./data`),
 `LOOM_CONSOLE_DIST` (`./console/dist`), `LOOM_PYTHON_BIN` (`python3`),
-`LOOM_NODE_BIN` (`node`), `RUST_LOG` (`info`).
+`LOOM_NODE_BIN` (`node`), `LOOM_PASSWORD` (unset = no auth), `RUST_LOG` (`info`).
 
 The Docker image ships a Python venv with **numpy, pandas, scipy, and scikit-learn**
 (`LOOM_PYTHON_BIN=/opt/loom-py/bin/python3`, BLAS/OpenMP pinned to one thread per worker).
@@ -324,3 +402,15 @@ examples/          Runnable example pipelines
 docs/              Architecture notes & screenshots
 site/              Landing page (single self-contained HTML — host it anywhere)
 ```
+
+## Contributing
+
+Issues and PRs welcome — especially new **labs**. A lab is a workflow + notebook that
+teaches one technique with real numbers; if you build one with your agent of choice and
+it renders cleanly, open a PR adding it to the table above with a link to the published
+notebook. Run `cargo test --workspace`, `cargo clippy --workspace --all-targets`, and
+`cd console && npm run build` before sending.
+
+## License
+
+[MIT](LICENSE).
