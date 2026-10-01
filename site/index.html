@@ -131,6 +131,8 @@ h2{font-size:36px;letter-spacing:-.02em;color:var(--ink);margin:10px 0 14px;font
 
 /* code */
 .codes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:36px}
+.shot{display:block;width:100%;max-width:980px;margin:32px auto 8px;border:1px solid var(--border);border-radius:16px;box-shadow:0 30px 80px -40px rgba(0,0,0,.8)}
+.grid.labs .card h3{font-size:16px}
 .codebox{background:#070d1a;border:1px solid var(--border);border-radius:16px;overflow:hidden}
 .codebox .bar{display:flex;align-items:center;gap:8px;padding:12px 18px;border-bottom:1px solid var(--border);
   font-family:var(--mono);font-size:12px;color:var(--ink-3)}
@@ -169,6 +171,7 @@ footer .right{margin-left:auto;display:flex;gap:18px}
   </span>
   <div class="links">
     <a href="./docs.html">Docs</a>
+    <a href="#labs">Labs</a>
     <a href="#features">Features</a>
     <a href="#benchmarks">Benchmarks</a>
     <a href="#code">Code</a>
@@ -178,16 +181,17 @@ footer .right{margin-left:auto;display:flex;gap:18px}
 
 <div class="hero">
   <div>
-    <span class="kicker">One Rust binary · 16 MB idle · agent-native</span>
-    <h1>Orchestrate Python&nbsp;&amp;&nbsp;TypeScript <span class="g">at Rust speed.</span></h1>
-    <p class="sub">Workflow DAGs, serverless functions, streaming ingestion, SQL analytics, and
-    notebooks — one process, no brokers, no database servers. Tasks run in
-    <b style="color:var(--ink)">~1&nbsp;ms</b> on warm workers and results flow across language boundaries.</p>
+    <span class="kicker">One Rust binary · MCP server · publishable notebooks</span>
+    <h1>Notebooks your AI can write. <span class="g">Pipelines it can run.</span></h1>
+    <p class="sub">Point Claude, Cursor, or any MCP agent at Loom and get back a <b style="color:var(--ink)">runnable, explained notebook</b> —
+    the SQL, the Python/TypeScript, the charts, the prose — backed by a real workflow run. Workflow DAGs,
+    serverless functions, streaming ingestion, and embedded SQL in one process. Tasks run in
+    <b style="color:var(--ink)">~1&nbsp;ms</b> on warm workers.</p>
     <div class="ctas">
       <a class="btn primary" href="https://github.com/DanielMcSheehy/rust-orchestrator">Get started →</a>
-      <a class="btn" href="#benchmarks">See the numbers</a>
+      <a class="btn" href="#labs">See what agents built</a>
     </div>
-    <span class="install">$ docker compose up <b># console + API on :7420</b></span>
+    <span class="install">$ docker run -p 7420:7420 -e LOOM_PASSWORD=change-me ghcr.io/danielmcsheehy/rust-orchestrator</span>
   </div>
 
   <div class="dagbox">
@@ -234,16 +238,34 @@ footer .right{margin-left:auto;display:flex;gap:18px}
   <div class="stat"><div class="v" data-count="16" data-suffix=" MB">0</div><div class="l">RAM at idle</div></div>
 </div>
 
+<section id="labs">
+  <span class="sec-kicker">Built by agents, on Loom</span>
+  <h2>Six teaching labs. Zero clicks in the UI.</h2>
+  <p class="lead">Each notebook below was produced end to end by an AI agent talking to Loom's MCP server:
+  it wrote a Python + TypeScript DAG, ran it, ingested the results, queried them with SQL, and wrote
+  the explanation and charts. The numbers are from the real runs.</p>
+  <img class="shot reveal" src="https://raw.githubusercontent.com/DanielMcSheehy/rust-orchestrator/main/docs/screenshots/notebook-gradient-descent.png"
+       alt="Gradient descent loss curves for five learning rates — one of them diverging" loading="lazy">
+  <div class="grid labs">
+    <div class="card reveal"><h3>Linear regression from the ground up</h3><p>Normal equation vs sklearn (match to <b>9e-14</b>), gradient descent with a learning rate that diverges past the stability limit, Ridge/Lasso coefficient paths.</p></div>
+    <div class="card reveal"><h3>How a classifier decides</h3><p>Sigmoid, log-loss, a decision-boundary map, a 50-threshold sweep → ROC/AUC <b>0.9968</b> on breast-cancer, calibration vs a tree and k-NN.</p></div>
+    <div class="card reveal"><h3>Overfitting &amp; bias-variance</h3><p>Polynomials of degree 1–15 on a noisy sine, bias²/variance from <b>200 bootstraps</b>, k-fold picking the degree, learning curves, Ridge taming degree 15.</p></div>
+    <div class="card reveal"><h3>How Shazam hears music</h3><p>Naive DFT vs radix-2 FFT (<b>548×</b> faster at N=4096), a spectrogram, constellation hashes, and a noisy clip matched by offset voting.</p></div>
+    <div class="card reveal"><h3>PageRank on a synthetic web</h3><p>Power iteration converging in 42 steps, a damping sweep, and a link farm dropping from in-degree rank 1 to PageRank rank 8.</p></div>
+    <div class="card reveal"><h3>Backprop from scratch</h3><p>A 2→36→36→1 MLP written in TypeScript, the chain rule written out, decision-boundary snapshots per epoch, <b>90.4%</b> held-out accuracy.</p></div>
+  </div>
+</section>
+
 <section id="features">
   <span class="sec-kicker">Everything included</span>
-  <h2>Four products. One process.</h2>
-  <p class="lead">The orchestrator, the serverless runtime, the analytics engine, and the notebook
-  usually arrive as four vendors and a Kubernetes cluster. Loom ships them as a single binary with SQLite inside.</p>
+  <h2>Five products. One process.</h2>
+  <p class="lead">The orchestrator, the serverless runtime, the analytics engine, the notebook, and the
+  agent interface usually arrive as five vendors and a Kubernetes cluster. Loom ships them as a single binary with SQLite inside.</p>
   <div class="grid">
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6.5 8 10.5 16M17.5 8 13.5 16"/></svg></div>
       <h3>Polyglot DAGs</h3><p>Python, TypeScript, and JavaScript tasks in <b>one graph</b> — a Python task's output becomes a TS task's input. Parallel layers, retries, timeouts, cycle-validated at deploy.</p></div>
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></div>
-      <h3>Warm worker pools</h3><p>Interpreters stay alive between tasks. Cold-start dies: <b>36 ms → 1.2 ms</b> per Python invoke, 124 ms → 1.6 ms for TypeScript. Containers and microVMs available when isolation beats latency.</p></div>
+      <h3>Warm pools or sandboxes</h3><p>Interpreters stay alive between tasks — <b>36 ms → 1.2 ms</b> per Python invoke. When trust matters more than latency, flip one env var to run each task in a locked-down <b>container</b> or a <b>microVM</b> (Kata / Firecracker).</p></div>
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
       <h3>Streaming everything</h3><p>Run states, task logs, and metrics broadcast over <b>SSE</b>. Ingestion consumes NDJSON chunk-by-chunk at ~780 MB/s — gigabyte payloads never sit in memory.</p></div>
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/></svg></div>
@@ -251,11 +273,11 @@ footer .right{margin-left:auto;display:flex;gap:18px}
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 17l6-5-6-5M12 19h8"/></svg></div>
       <h3>Serverless functions</h3><p>Deploy a handler in either language, invoke over HTTP with JSON or stream logs + result via SSE. <b>~775 invocations/s</b> on a dev container.</p></div>
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 3v18M12 8h4M12 12h4"/></svg></div>
-      <h3>Notebooks</h3><p>Observable-style executable documents: markdown, CodeMirror-powered code cells in any runtime, SQL cells, and <b>charts in between</b> — live against the platform.</p></div>
+      <h3>Notebooks</h3><p>Observable-style executable documents: markdown with images, code cells in any runtime with <b>data-aware autocomplete</b> (it knows the fields of the cell above), SQL cells, and nine chart marks — bar, line, area, scatter, donut, histogram, radar, min/avg/max bands — with a colour picker. Publish read-only with one click.</p></div>
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 2a4 4 0 0 1 4 4c2.5.5 4 2.5 4 5a5 5 0 0 1-3 4.6V17a5 5 0 0 1-10 0v-1.4A5 5 0 0 1 4 11c0-2.5 1.5-4.5 4-5a4 4 0 0 1 4-4z"/></svg></div>
-      <h3>Agent-native (MCP)</h3><p>A built-in <b>Model Context Protocol</b> server with 15 tools: agents compose workflows, execute code, query data, and read results — a self-correcting loop out of the box.</p></div>
+      <h3>Agent-native (MCP)</h3><p>A built-in <b>Model Context Protocol</b> server with 15 tools: agents compose workflows, execute code, query data, create notebooks, and read results — a self-correcting loop out of the box. <span class="mono">claude mcp add loom …</span> and go.</p></div>
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
-      <h3>Isolation tiers</h3><p>Dial speed vs. trust per deployment: bare <b>process</b>, locked-down <b>container</b>, or <b>microVM</b> (Kata / Firecracker) — one env var, same stdio protocol.</p></div>
+      <h3>One password. Publish what you want.</h3><p>Set <span class="mono">LOOM_PASSWORD</span> and the API, MCP, and console are locked. Hit <b>Publish</b> on a notebook and anyone with the link can read it — cells, outputs, charts — but nothing public can execute or edit. Unpublish any time.</p></div>
     <div class="card reveal"><div class="ico"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/></svg></div>
       <h3>Zero infrastructure</h3><p>One 67 MB binary, one SQLite file (WAL), one volume. <b>16 MB RAM idle</b>, 0% CPU. Deploys on a $4 VPS, docker compose, or Coolify in three clicks.</p></div>
   </div>
@@ -322,9 +344,12 @@ run = client.<span class="f">trigger</span>(wf[<span class="s">"id"</span>], wai
     loom.<span class="f">ingest</span>(<span class="s">"zone-aggregates"</span>, rows)
     <span class="k">return</span> {<span class="s">"zones"</span>: <span class="f">len</span>(rows)}
 
-<span class="c"># agents drive the same surface over MCP:</span>
-<span class="c"># claude mcp add --transport http \</span>
-<span class="c">#   loom http://localhost:7420/mcp</span></pre>
+<span class="c"># agents drive the same surface over MCP (15 tools):</span>
+<span class="c">$ claude mcp add --transport http loom http://localhost:7420/mcp \</span>
+<span class="c">    --header "Authorization: Bearer $LOOM_PASSWORD"</span>
+<span class="c">&gt; "Build a lab that teaches gradient descent: data,</span>
+<span class="c">&gt;  three learning rates, loss curves, explain the math."</span>
+<span class="c"># → workflow + run + datasets + a published notebook</span></pre>
     </div>
   </div>
 </section>
@@ -334,9 +359,9 @@ run = client.<span class="f">trigger</span>(wf[<span class="s">"id"</span>], wai
   <h2>Your infra bill will think<br>it's a <span style="background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent">rounding error.</span></h2>
   <div class="deploy">
     <span class="c"># everything — console, API, workers, SQL engine:</span>
-    git clone https://github.com/DanielMcSheehy/rust-orchestrator &amp;&amp; cd rust-orchestrator<br>
-    docker compose up --build
-    <span class="c"># or Coolify: New Resource → /docker-compose.coolify.yml</span>
+    docker run -p 7420:7420 -v loom-data:/data -e LOOM_PASSWORD=change-me \<br>
+    &nbsp;&nbsp;ghcr.io/danielmcsheehy/rust-orchestrator
+    <span class="c"># or Coolify: New Resource → /docker-compose.coolify.yml · or git clone && docker compose up --build</span>
   </div>
   <a class="btn primary" href="https://github.com/DanielMcSheehy/rust-orchestrator">Star it on GitHub →</a>
 </div>

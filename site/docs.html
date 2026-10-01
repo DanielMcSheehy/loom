@@ -131,13 +131,19 @@ an SSE event bus, and an MCP server for AI agents. State lives in a single SQLit
   <li><b>Zero infrastructure</b> — no broker, no database server; 16 MB RAM at idle.</li>
   <li><b>Agent-native</b> — every capability exposed as JSON HTTP + MCP tools.</li>
 </ul>
-<div class="callout">⚠ The API is <b>unauthenticated by design</b> (trusted, single-tenant).
-Keep deployments internal or front them with your proxy's access controls.</div>
+<div class="callout">🔐 <b>Authentication:</b> set <span class="mono">LOOM_PASSWORD</span> and every API/MCP/console
+request needs it — <span class="mono">Authorization: Bearer &lt;password&gt;</span>, the console's login cookie, or
+<span class="mono">?token=</span> on SSE streams. <b>Published</b> notebooks (<span class="mono">POST /api/notebooks/{id}/publish</span>)
+stay readable by anyone with the link, read-only. Leave it unset and Loom runs wide open — fine on your own
+machine, never on the internet.</div>
 </section>
 
 <section id="quickstart">
 <h2>Quickstart</h2>
-<pre><span class="c"># run everything (console + API on :7420)</span>
+<pre><span class="c"># run everything (console + API on :7420), password-protected</span>
+docker run -p 7420:7420 -v loom-data:/data -e LOOM_PASSWORD=change-me ghcr.io/danielmcsheehy/rust-orchestrator
+
+<span class="c"># or from source</span>
 git clone https://github.com/DanielMcSheehy/rust-orchestrator &amp;&amp; cd rust-orchestrator
 docker compose up --build
 
