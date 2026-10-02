@@ -138,6 +138,11 @@ h2{font-size:36px;letter-spacing:-.02em;color:var(--ink);margin:10px 0 14px;font
 .showcase figcaption b{color:var(--ink)}
 @media(max-width:900px){.showcase{grid-template-columns:1fr}}
 .grid.labs .card h3{font-size:16px}
+.grid.labs a.card{text-decoration:none;color:inherit;display:block}
+.grid.labs a.card:hover{border-color:rgba(96,165,250,.5);transform:translateY(-2px)}
+.grid.labs .go{font-size:11px;color:var(--sky);font-weight:500;margin-left:6px}
+nav .signin{border:1px solid var(--border);border-radius:999px;padding:6px 14px;color:var(--ink)!important}
+nav .signin:hover{border-color:var(--sky)}
 .codebox{background:#070d1a;border:1px solid var(--border);border-radius:16px;overflow:hidden}
 .codebox .bar{display:flex;align-items:center;gap:8px;padding:12px 18px;border-bottom:1px solid var(--border);
   font-family:var(--mono);font-size:12px;color:var(--ink-3)}
@@ -181,6 +186,7 @@ footer .right{margin-left:auto;display:flex;gap:18px}
     <a href="#benchmarks">Benchmarks</a>
     <a href="#code">Code</a>
     <a href="https://github.com/DanielMcSheehy/rust-orchestrator">GitHub</a>
+    <a class="signin" href="https://orchestrator.swarmlaboratory.com">Sign in →</a>
   </div>
 </nav>
 
@@ -194,7 +200,7 @@ footer .right{margin-left:auto;display:flex;gap:18px}
     <b style="color:var(--ink)">~1&nbsp;ms</b> on warm workers.</p>
     <div class="ctas">
       <a class="btn primary" href="https://github.com/DanielMcSheehy/rust-orchestrator">Get started →</a>
-      <a class="btn" href="#labs">See what agents built</a>
+      <a class="btn" href="#labs">Open the live demo</a>
     </div>
     <span class="install">$ docker run -p 7420:7420 -e LOOM_PASSWORD=change-me ghcr.io/danielmcsheehy/rust-orchestrator</span>
   </div>
@@ -246,6 +252,7 @@ footer .right{margin-left:auto;display:flex;gap:18px}
 <section id="labs">
   <span class="sec-kicker">Built by agents, on Loom</span>
   <h2>Six teaching labs. Zero clicks in the UI.</h2>
+  <p class="lead" style="margin-top:-6px"><b style="color:var(--ink)">Live demo:</b> every lab below is published read-only on a real Loom instance — open one and scroll. Outputs are the saved results of the run; nothing can be executed or edited without signing in.</p>
   <p class="lead">Each notebook below was produced end to end by an AI agent talking to Loom's MCP server:
   it wrote a Python + TypeScript DAG, ran it, ingested the results, queried them with SQL, and wrote
   the explanation and charts. The numbers are from the real runs.</p>
@@ -261,12 +268,12 @@ footer .right{margin-left:auto;display:flex;gap:18px}
   </div>
   <p class="lead" style="margin-top:28px">No matplotlib, no image uploads — charts are the console's own SVG renderer over the data grid behind each cell. Publish the notebook and the outputs ship with it, read-only.</p>
   <div class="grid labs">
-    <div class="card reveal"><h3>Linear regression from the ground up</h3><p>Normal equation vs sklearn (match to <b>9e-14</b>), gradient descent with a learning rate that diverges past the stability limit, Ridge/Lasso coefficient paths.</p></div>
-    <div class="card reveal"><h3>How a classifier decides</h3><p>Sigmoid, log-loss, a decision-boundary map, a 50-threshold sweep → ROC/AUC <b>0.9968</b> on breast-cancer, calibration vs a tree and k-NN.</p></div>
-    <div class="card reveal"><h3>Overfitting &amp; bias-variance</h3><p>Polynomials of degree 1–15 on a noisy sine, bias²/variance from <b>200 bootstraps</b>, k-fold picking the degree, learning curves, Ridge taming degree 15.</p></div>
-    <div class="card reveal"><h3>How Shazam hears music</h3><p>Naive DFT vs radix-2 FFT (<b>548×</b> faster at N=4096), a spectrogram, constellation hashes, and a noisy clip matched by offset voting.</p></div>
-    <div class="card reveal"><h3>PageRank on a synthetic web</h3><p>Power iteration converging in 42 steps, a damping sweep, and a link farm dropping from in-degree rank 1 to PageRank rank 8.</p></div>
-    <div class="card reveal"><h3>Backprop from scratch</h3><p>A 2→36→36→1 MLP written in TypeScript, the chain rule written out, decision-boundary snapshots per epoch, <b>90.4%</b> held-out accuracy.</p></div>
+    <a class="card reveal lab" href="https://orchestrator.swarmlaboratory.com/notebooks/c3dfa76b-4246-4d06-a545-32ffe5d29fbd" target="_blank" rel="noopener"><h3>Linear regression from the ground up <span class="go">open ↗</span></h3><p>Normal equation vs sklearn (match to <b>9e-14</b>), gradient descent with a learning rate that diverges past the stability limit, Ridge/Lasso coefficient paths.</p></a>
+    <a class="card reveal lab" href="https://orchestrator.swarmlaboratory.com/notebooks/e1687c6f-5dcd-4b78-8e33-758819d09e17" target="_blank" rel="noopener"><h3>How a classifier decides <span class="go">open ↗</span></h3><p>Sigmoid, log-loss, a decision-boundary map, a 50-threshold sweep → ROC/AUC <b>0.9968</b> on breast-cancer, calibration vs a tree and k-NN.</p></a>
+    <a class="card reveal lab" href="https://orchestrator.swarmlaboratory.com/notebooks/ada60b3c-ccf2-43fc-a44c-7397b9e683a6" target="_blank" rel="noopener"><h3>Overfitting &amp; bias-variance <span class="go">open ↗</span></h3><p>Polynomials of degree 1–15 on a noisy sine, bias²/variance from <b>200 bootstraps</b>, k-fold picking the degree, learning curves, Ridge taming degree 15.</p></a>
+    <a class="card reveal lab" href="https://orchestrator.swarmlaboratory.com/notebooks/d5a907dc-0dc5-47f6-8d08-37e8dff218b7" target="_blank" rel="noopener"><h3>How Shazam hears music <span class="go">open ↗</span></h3><p>Naive DFT vs radix-2 FFT (<b>548×</b> faster at N=4096), a spectrogram, constellation hashes, and a noisy clip matched by offset voting.</p></a>
+    <a class="card reveal lab" href="https://orchestrator.swarmlaboratory.com/notebooks/8ebe1bf4-f114-49ef-b864-c2c4849a1767" target="_blank" rel="noopener"><h3>PageRank on a synthetic web <span class="go">open ↗</span></h3><p>Power iteration converging in 42 steps, a damping sweep, and a link farm dropping from in-degree rank 1 to PageRank rank 8.</p></a>
+    <a class="card reveal lab" href="https://orchestrator.swarmlaboratory.com/notebooks/4247791a-1cd7-439f-9327-6cfd51942cb9" target="_blank" rel="noopener"><h3>Backprop from scratch <span class="go">open ↗</span></h3><p>A 2→36→36→1 MLP written in TypeScript, the chain rule written out, decision-boundary snapshots per epoch, <b>90.4%</b> held-out accuracy.</p></a>
   </div>
 </section>
 
