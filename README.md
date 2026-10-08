@@ -150,7 +150,9 @@ per-series colours — and the spec saves with the notebook.
 | --- | --- |
 | ![SQL over ingested datasets](docs/screenshots/data-query.png) | ![Serverless function playground](docs/screenshots/functions.png) |
 
-![Radar chart — one of nine chart marks, with per-series colours and min/avg/max statistic lines](docs/screenshots/chart-radar.png)
+| Math → code → proof | Every chart is live |
+| --- | --- |
+| ![Backprop lab — the chain rule written out in markdown, the five steps in a Python cell, and the table checking the analytic gradient against a finite difference](docs/screenshots/notebook-chain-rule.png) | ![Linear-regression lab — a SQL cell over the run's loss table with the chart controls open: area mark, log scale, colour by learning rate](docs/screenshots/notebook-chart-controls.png) |
 
 ## Architecture
 
