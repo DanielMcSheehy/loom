@@ -150,9 +150,9 @@ per-series colours — and the spec saves with the notebook.
 | --- | --- |
 | ![SQL over ingested datasets](docs/screenshots/data-query.png) | ![Serverless function playground](docs/screenshots/functions.png) |
 
-| Math → code → proof | Question → chart → answer |
+| Math → code → proof | One radar, two recommenders |
 | --- | --- |
-| ![Backprop lab — the chain rule written out in markdown, the five steps in a Python cell, and the table checking the analytic gradient against a finite difference](docs/screenshots/notebook-chain-rule.png) | ![Polls lab — 2,000 simulated polls of 1,000 people form a bell curve around the true 52%](docs/screenshots/notebook-polls.png) |
+| ![Backprop lab — the chain rule written out in markdown, the five steps in a Python cell, and the table checking the analytic gradient against a finite difference](docs/screenshots/notebook-chain-rule.png) | ![Recommendations lab — a radar of hit rate by music taste: 'people like you' vs 'most popular', with the question above and the answer below](docs/screenshots/notebook-radar.png) |
 
 ## Architecture
 
