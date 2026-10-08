@@ -126,11 +126,25 @@ shareable, runnable, explained answer in one sitting.
 
 Every screenshot below is the real UI, served by the binary itself.
 
-![Loom console — live dashboard](docs/screenshots/dashboard.png)
+### Notebooks: write a cell, run it, pick a chart
 
-| Orchestrate | Observe |
+![A Python cell returning a pandas DataFrame, run with ⌘⏎, then flicked through bar, line, area, scatter, donut and radar marks](docs/screenshots/notebook-chart-demo.gif)
+
+Return a DataFrame (or rows) and the output becomes a data grid with column profiles;
+the Chart tab opens the controls — nine marks, colour by column, min/avg/max lines,
+per-series colours — and the spec saves with the notebook.
+
+### Workflows: see the DAG before you click
+
+![Workflows page — one card per workflow with a mini task graph, trigger, last run and success rate](docs/screenshots/workflows.png)
+
+| Click a task for its code and results | Runs: Gantt timeline + expandable task results |
 | --- | --- |
-| ![lab-shazam workflow — Python + TypeScript DAG with duration trend](docs/screenshots/workflow-dag.png) | ![lab-shazam run — naive DFT vs FFT, spectrogram, fingerprint match on a Gantt timeline](docs/screenshots/run-detail.png) |
+| ![lab-shazam workflow — full-width task graph with the DFT-vs-FFT task open in the side panel: code, retries, timeout, and the selected run's result](docs/screenshots/workflow-dag.png) | ![ml-classify run — task graph coloured by state, Gantt timeline, task rows that expand into tables, charts and logs](docs/screenshots/run-detail.png) |
+
+### Dashboard, data, functions
+
+![Loom console — live dashboard](docs/screenshots/dashboard.png)
 
 | Query | Invoke |
 | --- | --- |
