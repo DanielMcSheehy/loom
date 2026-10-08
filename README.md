@@ -52,7 +52,7 @@ with SQL, and charted in a teaching notebook.
 | **PageRank on a synthetic web** | Power iteration, damping sweep, link farms losing to real authority |
 | **Backprop from scratch** | A 2→36→36→1 MLP in TypeScript, chain rule written out, decision-boundary snapshots per epoch |
 
-![Gradient descent loss curves — five learning rates, one of them diverging](docs/screenshots/notebook-gradient-descent.png)
+![Compound-interest lab — the everyday question, the SQL, a stacked area of what you put in vs growth, and the answer in plain English](docs/screenshots/notebook-compound.png)
 
 ![Notebook lab — training a neural net from scratch on two spirals: SQL, charts, and the math in markdown](docs/screenshots/notebook.png)
 
@@ -150,9 +150,9 @@ per-series colours — and the spec saves with the notebook.
 | --- | --- |
 | ![SQL over ingested datasets](docs/screenshots/data-query.png) | ![Serverless function playground](docs/screenshots/functions.png) |
 
-| Math → code → proof | Every chart is live |
+| Math → code → proof | Question → chart → answer |
 | --- | --- |
-| ![Backprop lab — the chain rule written out in markdown, the five steps in a Python cell, and the table checking the analytic gradient against a finite difference](docs/screenshots/notebook-chain-rule.png) | ![Linear-regression lab — a SQL cell over the run's loss table with the chart controls open: area mark, log scale, colour by learning rate](docs/screenshots/notebook-chart-controls.png) |
+| ![Backprop lab — the chain rule written out in markdown, the five steps in a Python cell, and the table checking the analytic gradient against a finite difference](docs/screenshots/notebook-chain-rule.png) | ![Polls lab — 2,000 simulated polls of 1,000 people form a bell curve around the true 52%](docs/screenshots/notebook-polls.png) |
 
 ## Architecture
 
