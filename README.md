@@ -334,7 +334,8 @@ cd sdks/typescript && npm run build
 
 Configuration (env vars): `LOOM_PORT` (7420), `LOOM_DATA_DIR` (`./data`),
 `LOOM_CONSOLE_DIST` (`./console/dist`), `LOOM_PYTHON_BIN` (`python3`),
-`LOOM_NODE_BIN` (`node`), `LOOM_PASSWORD` (unset = no auth), `RUST_LOG` (`info`).
+`LOOM_NODE_BIN` (`node`), `LOOM_PASSWORD` (unset = no auth), `LOOM_SITE_DIR` (`./site`,
+served at `/landing`), `RUST_LOG` (`info`).
 
 The Docker image ships a Python venv with **numpy, pandas, scipy, and scikit-learn**
 (`LOOM_PYTHON_BIN=/opt/loom-py/bin/python3`, BLAS/OpenMP pinned to one thread per worker).

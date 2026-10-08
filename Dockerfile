@@ -31,9 +31,11 @@ RUN python3 -m venv /opt/loom-py \
   && /opt/loom-py/bin/pip install --no-cache-dir numpy pandas scipy scikit-learn
 COPY --from=server /build/target/release/loom-server /usr/local/bin/loom-server
 COPY --from=console /build/dist /app/console/dist
+COPY site/ /app/site
 ENV LOOM_PORT=7420 \
     LOOM_DATA_DIR=/data \
     LOOM_CONSOLE_DIST=/app/console/dist \
+    LOOM_SITE_DIR=/app/site \
     LOOM_PYTHON_BIN=/opt/loom-py/bin/python3 \
     OMP_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1 \

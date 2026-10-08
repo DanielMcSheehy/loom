@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
     let port: u16 = env_or("LOOM_PORT", "7420").parse()?;
     let data_dir = PathBuf::from(env_or("LOOM_DATA_DIR", "./data"));
     let console_dist = PathBuf::from(env_or("LOOM_CONSOLE_DIST", "./console/dist"));
+    let site_dir = PathBuf::from(env_or("LOOM_SITE_DIR", "./site"));
 
     std::fs::create_dir_all(&data_dir)?;
     // Workers inherit this and reach back into the platform (loom.query()
@@ -55,6 +56,13 @@ async fn main() -> anyhow::Result<()> {
     scheduler::spawn(state.clone());
 
     let mut app = routes::app(state);
+
+    // The public landing page (site/) at /landing — static, always open, no
+    // auth: it is marketing, not data. The console's SPA keeps the root.
+    if site_dir.join("index.html").exists() {
+        info!("serving landing page from {} at /landing", site_dir.display());
+        app = app.nest_service("/landing", ServeDir::new(&site_dir));
+    }
 
     // Serve the built console when present (docker / production).
     if console_dist.join("index.html").exists() {

@@ -25,6 +25,7 @@ export default (
       head={["Variable", "Default", "Meaning"]}
       rows={[
         row("LOOM_ISOLATION", "process", <><C>process</C> | <C>container</C> | <C>microvm</C>. Any other value fails start-up. See <DocLink to="/docs/isolation">Isolation</DocLink>.</>),
+        row("LOOM_SITE_DIR", "./site", "Static landing page (site/) served at /landing without auth. Skipped when the directory has no index.html."),
         row("LOOM_PYTHON_BIN", "python3", "Interpreter for Python workers (process mode). Handlers can import whatever is installed for it. The Docker image sets /opt/loom-py/bin/python3, a venv with numpy, pandas, scipy, and scikit-learn."),
         row("LOOM_NODE_BIN", "node", "Binary for JavaScript/TypeScript workers (process mode). TypeScript needs Node 22+."),
         row("LOOM_WORKER_POOL", "1", <>Set to <C>0</C> to disable the warm pool and spawn a fresh process per job (process mode only; container/microVM never pool).</>),
