@@ -5,10 +5,12 @@ import { api, formatDuration, formatMs, timeAgo, useEvents } from "../api";
 import { useCrumbs } from "../App";
 import Chart from "../components/charts/Chart";
 import DagGraph from "../components/DagGraph";
+import JsonView from "../components/JsonView";
+import TaskPanel, { Facts } from "../components/TaskPanel";
 import { Banner, Empty, RuntimeBadge, StatusPill, Tile, useConfirm, useToast } from "../components/ui";
 import WorkflowBuilder from "../components/WorkflowBuilder";
-import type { Run, TaskRun, Workflow, WorkflowSpec } from "../types";
-import { computeMetrics, HistoryBars } from "./Workflows";
+import type { Run, RunState, TaskRun, Workflow, WorkflowSpec } from "../types";
+import { computeMetrics, formatSchedule, HistoryBars, TriggerChips } from "./Workflows";
 
 const STATE_COLORS = { completed: "var(--good)", failed: "var(--critical)", running: "var(--running)", cancelled: "var(--ink-4)", pending: "var(--ink-4)" };
 
@@ -42,6 +44,10 @@ function RunningProgress({ run, onClick }: { run: Run; onClick: () => void }) {
   );
 }
 
+function isEmptyParams(p: unknown): boolean {
+  return p === null || p === undefined || (typeof p === "object" && !Array.isArray(p) && Object.keys(p as object).length === 0);
+}
+
 export default function WorkflowDetail() {
   const { id } = useParams<{ id: string }>();
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
@@ -49,6 +55,10 @@ export default function WorkflowDetail() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [paramsDraft, setParamsDraft] = useState("");
+  // The run whose task states colour the graph and feed the task panel.
+  const [viewRunId, setViewRunId] = useState<string | null>(null);
+  const [viewTasks, setViewTasks] = useState<TaskRun[]>([]);
+  const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [confirm, confirmDialog] = useConfirm();
   const toast = useToast();
   const navigate = useNavigate();
@@ -70,7 +80,39 @@ export default function WorkflowDetail() {
         return next;
       });
     }
+    if (ev.type === "task_updated" && ev.task.run_id === viewRunId) {
+      setViewTasks((prev) => {
+        const idx = prev.findIndex((t) => t.task_id === ev.task.task_id);
+        if (idx === -1) return [...prev, ev.task];
+        const next = [...prev];
+        next[idx] = ev.task;
+        return next;
+      });
+    }
   });
+
+  // Default the graph to the latest run once history arrives.
+  useEffect(() => {
+    if (viewRunId === null && runs.length) setViewRunId(runs[0].id);
+  }, [runs, viewRunId]);
+  useEffect(() => {
+    if (!viewRunId) {
+      setViewTasks([]);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get<{ run: Run; tasks: TaskRun[] }>(`/api/runs/${viewRunId}`)
+      .then((d) => {
+        if (!cancelled) setViewTasks(d.tasks);
+      })
+      .catch(() => {
+        if (!cancelled) setViewTasks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewRunId]);
 
   const metrics = useMemo(() => computeMetrics(runs), [runs]);
   const successPct = metrics.completed + metrics.failed > 0 ? Math.round((metrics.completed / (metrics.completed + metrics.failed)) * 100) : null;
@@ -83,6 +125,11 @@ export default function WorkflowDetail() {
         .map((r, i) => ({ run: `#${i + 1}`, ms: r.started_at && r.finished_at ? new Date(r.finished_at).getTime() - new Date(r.started_at).getTime() : 0, state: r.state })),
     [runs],
   );
+  const viewRun = runs.find((r) => r.id === viewRunId) ?? null;
+  const states = useMemo(() => Object.fromEntries(viewTasks.map((t) => [t.task_id, t.state])) as Record<string, RunState>, [viewTasks]);
+  const selectedSpec = workflow?.spec.tasks.find((t) => t.id === selectedTask) ?? null;
+  const selectedRun = selectedTask ? viewTasks.find((t) => t.task_id === selectedTask) ?? null : null;
+  const closePanel = useCallback(() => setSelectedTask(null), []);
 
   const save = async (spec: WorkflowSpec) => {
     const wf = await api.put<Workflow>(`/api/workflows/${id}`, spec);
@@ -111,17 +158,19 @@ export default function WorkflowDetail() {
 
   if (!workflow) return <div className="content">{error ? <Banner kind="error">{error}</Banner> : <div className="skeleton" style={{ height: 28, width: 300 }} />}</div>;
 
+  const spec = workflow.spec;
   return (
     <div className="content">
       {confirmDialog}
+      {selectedSpec && <TaskPanel task={selectedSpec} run={selectedRun} runLabel={viewRun ? `run ${viewRun.id.slice(0, 8)}` : undefined} onClose={closePanel} />}
       <div className="page-head">
         <div>
           <h1>
-            {workflow.spec.name}
+            {spec.name}
             {metrics.last && <StatusPill state={metrics.last.state} />}
           </h1>
           <p>
-            {workflow.spec.description || "No description."} · {[...new Set(workflow.spec.tasks.map((t) => t.runtime))].map((r) => <RuntimeBadge key={r} runtime={r} />)}
+            {spec.description || "No description."} · {[...new Set(spec.tasks.map((t) => t.runtime))].map((r) => <RuntimeBadge key={r} runtime={r} />)}
           </p>
         </div>
         <div className="actions">
@@ -137,7 +186,7 @@ export default function WorkflowDetail() {
       {editing && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-head"><h2>Edit workflow</h2></div>
-          <div className="card-body"><WorkflowBuilder initial={workflow.spec} workflowId={id} submitLabel="Save changes" onSubmit={save} /></div>
+          <div className="card-body"><WorkflowBuilder initial={spec} workflowId={id} submitLabel="Save changes" onSubmit={save} /></div>
         </div>
       )}
 
@@ -148,23 +197,57 @@ export default function WorkflowDetail() {
         <Tile label="Success rate" value={successPct === null ? "—" : `${successPct}%`} sub={`${metrics.completed} ok · ${metrics.failed} failed`} tone={successPct === null ? undefined : successPct >= 80 ? "good" : "bad"} />
         <Tile label="Avg duration" value={metrics.avgMs != null ? formatMs(metrics.avgMs) : "—"} tone="accent" />
         <Tile label="Last run" value={metrics.last ? timeAgo(metrics.last.created_at) : "never"} sub={metrics.last ? `trigger: ${metrics.last.trigger}` : undefined} />
-        <Tile label="Schedule" value={workflow.spec.triggers.every_secs ? `${workflow.spec.triggers.every_secs}s` : workflow.spec.triggers.on_ingest ? "on ingest" : "manual"} sub={workflow.spec.triggers.on_ingest ? `dataset ${workflow.spec.triggers.on_ingest}` : `${workflow.spec.max_parallel_tasks} parallel max`} />
+        <Tile label="Schedule" value={spec.triggers.every_secs ? `every ${formatSchedule(spec.triggers.every_secs)}` : spec.triggers.on_ingest ? "on ingest" : "manual"} sub={spec.triggers.on_ingest ? `dataset ${spec.triggers.on_ingest}` : `${spec.max_parallel_tasks} parallel max`} />
       </div>
 
-      <div className="grid-2" style={{ gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)" }}>
-        <div className="card">
-          <div className="card-head">
-            <h2>Task graph <span className="sub">{workflow.spec.tasks.length} tasks</span></h2>
-          </div>
-          <div className="card-body"><DagGraph tasks={workflow.spec.tasks} /></div>
+      <div className="card">
+        <div className="card-head">
+          <h2>
+            Task graph <span className="sub">{spec.tasks.length} tasks · click a task for its code and results</span>
+          </h2>
+          <label className="small muted" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            states from
+            <select className="inline" value={viewRunId ?? ""} onChange={(e) => setViewRunId(e.target.value || null)} disabled={runs.length === 0}>
+              {runs.length === 0 && <option value="">no runs yet</option>}
+              {runs.slice(0, 25).map((r, i) => (
+                <option key={r.id} value={r.id}>
+                  {i === 0 ? "latest · " : ""}{r.id.slice(0, 8)} · {r.state} · {timeAgo(r.created_at)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <div className="card">
+        <div className="card-body">
+          <DagGraph tasks={spec.tasks} states={viewRunId ? states : undefined} selected={selectedTask} onSelect={(tid) => setSelectedTask((cur) => (cur === tid ? null : tid))} />
+        </div>
+      </div>
+
+      <div className="grid-2" style={{ marginTop: 16 }}>
+        <div className="card" style={{ marginTop: 0 }}>
           <div className="card-head">
             <h2>Duration trend <span className="sub">last {trend.length} runs</span></h2>
             <HistoryBars history={metrics.history} />
           </div>
           <div className="card-body" style={{ paddingBottom: 6 }}>
             {trend.length ? <Chart rows={trend} spec={{ mark: "bar", x: "run", y: ["ms"], color: "state", agg: "sum" }} height={170} colors={STATE_COLORS} /> : <Empty title="Never run" />}
+          </div>
+        </div>
+        <div className="card" style={{ marginTop: 0 }}>
+          <div className="card-head"><h2>Configuration</h2></div>
+          <div className="card-body" style={{ display: "grid", gap: 14 }}>
+            <Facts
+              items={[
+                ["Triggers", <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}><TriggerChips spec={spec} /></span>],
+                ["Max parallel", `${spec.max_parallel_tasks} task${spec.max_parallel_tasks === 1 ? "" : "s"}`],
+                ["Updated", `${timeAgo(workflow.updated_at)} · created ${new Date(workflow.created_at).toLocaleDateString()}`],
+              ]}
+            />
+            <div>
+              <h4 className="facts-title">
+                Params <span className="muted">· defaults every run starts from (task params overlay, trigger overrides)</span>
+              </h4>
+              {isEmptyParams(spec.params) ? <p className="muted small" style={{ margin: 0 }}>None.</p> : <JsonView value={spec.params} />}
+            </div>
           </div>
         </div>
       </div>

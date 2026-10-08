@@ -105,7 +105,7 @@ export default function DataGrid({
   rows,
   columns,
   pageSize = 50,
-  maxHeight = 460,
+  maxHeight = 300,
   summaries = true,
   filename = "result",
   dense,

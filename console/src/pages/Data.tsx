@@ -481,7 +481,7 @@ export default function Data() {
                     <span className="grow" />
                     <button className="btn sm ghost" onClick={() => { setQuerySql(`SELECT *\nFROM ${table(selected)}\nLIMIT 1000`); setTab("query"); }}>Open in workbench <ArrowRight size={12} /></button>
                   </div>
-                  <DataGrid rows={profile.sample} filename={selected} maxHeight={420} />
+                  <DataGrid rows={profile.sample} filename={selected} />
                 </div>
               )}
             </>

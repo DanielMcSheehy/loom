@@ -1,14 +1,13 @@
-import { ArrowSquareOut, XCircle } from "@phosphor-icons/react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowSquareOut, CaretRight, Code, XCircle } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, formatDuration, useEvents } from "../api";
 import { useCrumbs } from "../App";
-import { CodeBlock } from "../components/CodeEditor";
 import DagGraph from "../components/DagGraph";
-import JsonView from "../components/JsonView";
 import LogStream, { type LogLine } from "../components/LogStream";
-import { Banner, StatusPill, Tile, useConfirm, useToast } from "../components/ui";
-import type { Run, RunState, TaskRun, Workflow } from "../types";
+import TaskPanel, { TaskRunBody } from "../components/TaskPanel";
+import { Banner, RuntimeBadge, StatusPill, Tile, useConfirm, useToast } from "../components/ui";
+import type { Run, RunState, TaskRun, TaskSpec, Workflow } from "../types";
 
 const STATE_FILL: Record<string, string> = {
   completed: "var(--good)",
@@ -48,7 +47,10 @@ function TaskTimeline({ run, tasks }: { run: Run; tasks: TaskRun[] }) {
         const y = i * ROW + 6;
         return (
           <g key={t.task_id}>
-            <text x={LABEL - 10} y={y + 12} textAnchor="end" className="gantt-label">{t.task_id.slice(0, 18)}</text>
+            <text x={LABEL - 10} y={y + 12} textAnchor="end" className="gantt-label">
+              <title>{t.task_id}</title>
+              {t.task_id.slice(0, 18)}
+            </text>
             <rect x={x} y={y} width={w} height={16} rx="4" fill={STATE_FILL[t.state] ?? "var(--surface-4)"}>
               <title>{`${t.task_id}: ${t.state}, ${e - s}ms`}</title>
             </rect>
@@ -60,12 +62,79 @@ function TaskTimeline({ run, tasks }: { run: Run; tasks: TaskRun[] }) {
   );
 }
 
+function summary(t: TaskRun): string {
+  if (t.error) return t.error.split("\n")[0];
+  const r = t.result;
+  if (r === null || r === undefined) return "";
+  if (Array.isArray(r)) {
+    const first = r[0];
+    const cols = first && typeof first === "object" && !Array.isArray(first) ? Object.keys(first as object).length : null;
+    return `${r.length.toLocaleString()} row${r.length === 1 ? "" : "s"}${cols !== null ? ` × ${cols} col${cols === 1 ? "" : "s"}` : ""}`;
+  }
+  if (typeof r === "object") return `{${Object.keys(r as object).slice(0, 6).join(", ")}${Object.keys(r as object).length > 6 ? ", …" : ""}}`;
+  return JSON.stringify(r);
+}
+
+function TaskRow({ task, spec, open, onToggle, onInspect }: { task: TaskRun; spec?: TaskSpec; open: boolean; onToggle: () => void; onInspect?: () => void }) {
+  return (
+    <div className={`task-item${open ? " open" : ""}`}>
+      <div
+        className="task-row"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+      >
+        <span className="tname">
+          <CaretRight size={12} weight="bold" className="caret" />
+          <span className="truncate" title={task.name}>{task.name}</span>
+          {spec && <RuntimeBadge runtime={spec.runtime} />}
+        </span>
+        <StatusPill state={task.state} />
+        <span className="muted num">{formatDuration(task.started_at, task.finished_at)}</span>
+        <span className="muted mono truncate" style={{ color: task.error ? "var(--critical)" : undefined }}>
+          {summary(task)}
+        </span>
+        <span className="muted small num" style={{ whiteSpace: "nowrap" }}>
+          {task.attempts > 1 ? `${task.attempts} attempts` : ""}
+        </span>
+      </div>
+      {open && (
+        <div className="task-detail-body">
+          <TaskRunBody run={task} filename={task.task_id} />
+          {onInspect && (
+            <div>
+              <button
+                className="btn sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onInspect();
+                }}
+              >
+                <Code size={13} /> Task code &amp; spec
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RunDetail() {
   const { id } = useParams<{ id: string }>();
   const [run, setRun] = useState<Run | null>(null);
   const [tasks, setTasks] = useState<TaskRun[]>([]);
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [liveLogs, setLiveLogs] = useState<LogLine[]>([]);
+  const [openTasks, setOpenTasks] = useState<Set<string>>(new Set());
+  const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [confirm, confirmDialog] = useConfirm();
   const toast = useToast();
   useCrumbs([{ label: "Runs", to: "/runs" }, { label: run ? `${run.workflow_name} · ${run.id.slice(0, 8)}` : "…" }]);
@@ -77,6 +146,8 @@ export default function RunDetail() {
       .then(({ run, tasks }) => {
         setRun(run);
         setTasks(tasks);
+        // Failed tasks start expanded — that's what you came to see.
+        setOpenTasks(new Set(tasks.filter((t) => t.state === "failed").map((t) => t.task_id)));
         api.get<Workflow>(`/api/workflows/${run.workflow_id}`).then(setWorkflow).catch(() => {});
       })
       .catch(() => {});
@@ -93,6 +164,7 @@ export default function RunDetail() {
         next[idx] = ev.task;
         return next;
       });
+      if (ev.task.state === "failed") setOpenTasks((prev) => new Set(prev).add(ev.task.task_id));
     }
     if (ev.type === "log") setLiveLogs((prev) => [...prev, { ts: ev.ts, tag: ev.task_id, line: ev.line }].slice(-800));
   }, id);
@@ -108,6 +180,9 @@ export default function RunDetail() {
     }
   };
 
+  const closePanel = useCallback(() => setSelectedTask(null), []);
+  const specById = useMemo(() => new Map((workflow?.spec.tasks ?? []).map((t) => [t.id, t])), [workflow]);
+
   if (!run) return <div className="content"><div className="skeleton" style={{ height: 28, width: 300 }} /></div>;
 
   const states: Record<string, RunState> = Object.fromEntries(tasks.map((t) => [t.task_id, t.state]));
@@ -115,10 +190,20 @@ export default function RunDetail() {
   const logs = liveLogs.length ? liveLogs : storedLogs;
   const done = tasks.filter((t) => t.state === "completed").length;
   const isActive = run.state === "running" || run.state === "pending";
+  const selectedSpec = selectedTask ? specById.get(selectedTask) ?? null : null;
+  const selectedRun = selectedTask ? tasks.find((t) => t.task_id === selectedTask) ?? null : null;
+  const toggleTask = (tid: string) =>
+    setOpenTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(tid)) next.delete(tid);
+      else next.add(tid);
+      return next;
+    });
 
   return (
     <div className="content">
       {confirmDialog}
+      {selectedSpec && <TaskPanel task={selectedSpec} run={selectedRun} runLabel={`run ${run.id.slice(0, 8)}`} onClose={closePanel} />}
       <div className="page-head">
         <div>
           <h1>
@@ -151,40 +236,45 @@ export default function RunDetail() {
         </div>
       )}
 
-      <div className="grid-2">
-        {workflow && (
-          <div className="card">
-            <div className="card-head"><h2>Task graph</h2></div>
-            <div className="card-body"><DagGraph tasks={workflow.spec.tasks} states={states} /></div>
-          </div>
-        )}
+      {workflow && (
         <div className="card">
-          <div className="card-head"><h2>Timeline</h2></div>
-          <div className="card-body"><TaskTimeline run={run} tasks={tasks} /></div>
+          <div className="card-head">
+            <h2>
+              Task graph <span className="sub">click a task for its code and this run's result</span>
+            </h2>
+          </div>
+          <div className="card-body">
+            <DagGraph tasks={workflow.spec.tasks} states={states} selected={selectedTask} onSelect={(tid) => setSelectedTask((cur) => (cur === tid ? null : tid))} />
+          </div>
         </div>
+      )}
+
+      <div className="card">
+        <div className="card-head"><h2>Timeline</h2></div>
+        <div className="card-body"><TaskTimeline run={run} tasks={tasks} /></div>
       </div>
 
       <div className="card">
-        <div className="card-head"><h2>Tasks</h2></div>
+        <div className="card-head">
+          <h2>
+            Tasks <span className="sub">{tasks.length} · click a row for its result, logs and timings</span>
+          </h2>
+          {tasks.length > 0 && (
+            <button className="btn sm ghost" onClick={() => setOpenTasks(openTasks.size === tasks.length ? new Set() : new Set(tasks.map((t) => t.task_id)))}>
+              {openTasks.size === tasks.length ? "Collapse all" : "Expand all"}
+            </button>
+          )}
+        </div>
+        {tasks.length === 0 && <p className="muted small" style={{ margin: 0, padding: 16 }}>No tasks have been scheduled yet.</p>}
         {tasks.map((t) => (
-          <details className="task-detail" key={t.task_id} open={t.state === "failed"}>
-            <summary>
-              <div className="task-row">
-                <span className="tname">{t.name}</span>
-                <StatusPill state={t.state} />
-                <span className="muted num">{formatDuration(t.started_at, t.finished_at)}</span>
-                <span className="muted mono truncate" style={{ color: t.error ? "var(--critical)" : undefined }}>
-                  {t.error ?? (t.result !== null && t.result !== undefined ? JSON.stringify(t.result) : "")}
-                </span>
-              </div>
-            </summary>
-            <div className="task-detail-body">
-              {t.error && <Banner kind="error">{t.error}</Banner>}
-              {t.result !== null && t.result !== undefined && (typeof t.result === "object" ? <JsonView value={t.result} /> : <CodeBlock code={JSON.stringify(t.result, null, 2)} language="json" />)}
-              {t.logs.length > 0 && <pre className="result-json">{t.logs.join("\n")}</pre>}
-              <span className="muted small">{t.attempts} attempt{t.attempts === 1 ? "" : "s"}</span>
-            </div>
-          </details>
+          <TaskRow
+            key={t.task_id}
+            task={t}
+            spec={specById.get(t.task_id)}
+            open={openTasks.has(t.task_id)}
+            onToggle={() => toggleTask(t.task_id)}
+            onInspect={specById.has(t.task_id) ? () => setSelectedTask(t.task_id) : undefined}
+          />
         ))}
       </div>
 
